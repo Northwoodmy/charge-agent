@@ -167,7 +167,7 @@ select.chip { background: var(--white); cursor: pointer; font: inherit; }
 /* 端口已关闭的状态表现 */
 .port-card.closed { border-style: dashed; opacity: 0.85; }
 .badge.closed { border-style: dashed; color: var(--muted); }
-.pp-port.closed .pp-port-info b, .pp-port.closed .pp-port-w { color: var(--muted); }
+.pp-port.closed .pp-port-line1 b, .pp-port.closed .pp-port-w { color: var(--muted); }
 
 /* ── 区块通用 ── */
 .section {
@@ -308,14 +308,14 @@ details.system td:first-child { color: var(--ink); }
 }
 .pp-port {
   display: flex; align-items: center; gap: 8px;
-  padding: 9px 2px; border-bottom: 1px solid var(--line-soft);
+  padding: 7px 2px; border-bottom: 1px solid var(--line-soft);
 }
 .pp-port:last-child { border-bottom: none; }
 .pp-port-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; opacity: 0.35; }
 .pp-port.on .pp-port-dot { opacity: 1; }
-.pp-port-info { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.35; }
-.pp-port-info b { font-size: 13.5px; }
-.pp-port-info span { font-size: 11px; color: var(--muted); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pp-port-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 1px; }
+.pp-port-line1 b { font-size: 13.5px; }
+.pp-port-line2 { font-size: 10.5px; color: var(--muted); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pp-port-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .pp-port-w { font-family: var(--mono); font-size: 17px; font-weight: 700; min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
 .pp-port-w small { font-size: 10px; color: var(--muted); font-weight: 500; }

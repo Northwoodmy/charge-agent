@@ -846,9 +846,9 @@ function PopoverApp() {
         {sorted.map((p) => (
           <div key={p.idx} className={`pp-port ${p.attached ? 'on' : ''} ${p.active ? '' : 'closed'}`}>
             <span className="pp-port-dot" style={{ background: PORT_COLORS[p.idx] }} />
-            <div className="pp-port-info">
-              <b>{p.name}</b>
-              <span>{p.attached ? (() => {
+            <div className="pp-port-mid">
+              <div className="pp-port-line1"><b>{p.name}</b></div>
+              <div className="pp-port-line2">{p.attached ? (() => {
                 const pd = pdMap[p.no];
                 const parts = [`${p.voltageV.toFixed(1)}V · ${p.currentA.toFixed(2)}A`];
                 if (pd?.device_name_zh) parts.push(pd.device_name_zh);
@@ -857,7 +857,7 @@ function PopoverApp() {
                   parts.push(`电量${Math.round((pd.battery_present_capacity / pd.battery_design_capacity) * 100)}%`);
                 }
                 return parts.join(' · ');
-              })() : p.active ? '空闲' : '已关闭'}</span>
+              })() : p.active ? '空闲' : '已关闭'}</div>
             </div>
             <div className="pp-port-right">
               <div className="pp-port-w">{p.powerW}<small> W</small></div>
