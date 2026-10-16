@@ -20,7 +20,7 @@ const PROTOCOL_NAMES = {
   6: 'FCP', 7: 'SCP', 8: 'VOOC 1.0', 9: 'VOOC 4.0', 10: 'SuperVOOC 2.0',
   11: 'TFCP', 12: 'UFCS', 13: 'PE 1.0', 14: 'PE 2.0',
   15: 'PD 5V', 16: 'PD Fix HV', 17: 'PD SPR AVS', 18: 'PD PPS',
-  19: 'PD EPR HV', 20: 'PD AVS', 255: 'Idle',
+  19: 'PD EPR HV', 20: 'PD AVS', 21: 'Xiaomi Surge', 255: 'Idle',
 };
 
 function emit(type, payload) {

@@ -270,7 +270,8 @@ Agent 对话：用户 → Kimi/DeepSeek API → tool-calling → MCP 执行 → 
 | 7 | SCP | 18 | PD PPS |
 | 8 | VOOC 1.0 | 19 | PD EPR HV |
 | 9 | VOOC 4.0 | 20 | PD AVS |
-| 10 | SuperVOOC 2.0 | 255 | Idle |
+| 10 | SuperVOOC 2.0 | 21 | Xiaomi Surge（小米澎湃秒充） |
+| — | — | 255 | Idle |
 
 ### 8.2b 设备信息（get_device_info）
 SSID、RSSI 信号强度（dBm）、PSN、固件版本——系统抽屉展示网络质量。
