@@ -246,17 +246,17 @@ Agent 对话：用户 → Kimi/DeepSeek API → tool-calling → MCP 执行 → 
 
 | 码 | 协议 | 码 | 协议 |
 |---|---|---|---|
-| 0 | 未充电 | 11 | TFCP |
+| 0 | None | 11 | TFCP |
 | 1 | QC2.0 | 12 | UFCS |
 | 2 | QC3.0 | 13 | PE 1.0 |
 | 3 | QC3+ | 14 | PE 2.0 |
-| 4 | SFCP | 15 | PD 固定 5V |
-| 5 | AFC | 16 | PD 固定高压 |
+| 4 | SFCP | 15 | PD 5V |
+| 5 | AFC | 16 | PD Fix HV |
 | 6 | FCP | 17 | PD SPR AVS |
 | 7 | SCP | 18 | PD PPS |
-| 8 | VOOC 1.0 | 19 | PD EPR 高压 |
+| 8 | VOOC 1.0 | 19 | PD EPR HV |
 | 9 | VOOC 4.0 | 20 | PD AVS |
-| 10 | SuperVOOC 2.0 | 255 | 未充电 |
+| 10 | SuperVOOC 2.0 | 255 | Idle |
 
 ### 8.3 主要 REST API
 

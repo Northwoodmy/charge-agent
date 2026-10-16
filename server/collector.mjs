@@ -14,13 +14,13 @@ export const state = {
 
 const LIVE_CAP = 3600; // 30 分钟 × 2Hz
 
-// 官方固件枚举（IonBridge: SW356x config_types.h 的 FastChargingProtocol）
+// 官方固件枚举（IonBridge: SW356x config_types.h 的 FastChargingProtocol），英文规范名
 const PROTOCOL_NAMES = {
-  0: '未充电', 1: 'QC2.0', 2: 'QC3.0', 3: 'QC3+', 4: 'SFCP', 5: 'AFC',
+  0: 'None', 1: 'QC2.0', 2: 'QC3.0', 3: 'QC3+', 4: 'SFCP', 5: 'AFC',
   6: 'FCP', 7: 'SCP', 8: 'VOOC 1.0', 9: 'VOOC 4.0', 10: 'SuperVOOC 2.0',
   11: 'TFCP', 12: 'UFCS', 13: 'PE 1.0', 14: 'PE 2.0',
-  15: 'PD 固定 5V', 16: 'PD 固定高压', 17: 'PD SPR AVS', 18: 'PD PPS',
-  19: 'PD EPR 高压', 20: 'PD AVS', 255: '未充电',
+  15: 'PD 5V', 16: 'PD Fix HV', 17: 'PD SPR AVS', 18: 'PD PPS',
+  19: 'PD EPR HV', 20: 'PD AVS', 255: 'Idle',
 };
 
 function emit(type, payload) {
