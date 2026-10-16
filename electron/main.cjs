@@ -270,12 +270,14 @@ function setupUpdater() {
   if (isDev || !autoUpdater) return;
   autoUpdater.autoDownload = true; // 仅手动检查后触发下载
   autoUpdater.on('update-available', (info) => {
+    clearTimeout(checkTimer);
     updateState = { status: 'downloading', version: info.version };
     mlog('[UPDATE] 发现新版本:', info.version);
     rebuildTrayMenu();
     updateNotify('发现新版本 v' + info.version, '正在后台下载，完成后会提醒你');
   });
   autoUpdater.on('update-not-available', () => {
+    clearTimeout(checkTimer);
     mlog('[UPDATE] 已是最新');
     updateNotify('已是最新版本', `当前 v${app.getVersion()}，无需更新`);
     checkingUpdate = false;
