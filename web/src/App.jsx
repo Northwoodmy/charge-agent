@@ -197,9 +197,12 @@ function fmtBatt(pd) {
   const UNKNOWN = 65535;
   const present = pd.battery_present_capacity;
   const design = pd.battery_design_capacity;
-  if (design > 0 && design !== UNKNOWN) {
-    if (present === UNKNOWN || !(present > 0)) return null; // 有设计容量但当前电量未知
-    return `电量 ${Math.min(100, Math.round((present / design) * 100))}%`;
+  // 分母优先用「实际满充容量」（电池衰减后的真 100% 基准），无效时回退设计容量
+  const full = (pd.battery_last_full_charge_capacity > 0 && pd.battery_last_full_charge_capacity !== UNKNOWN)
+    ? pd.battery_last_full_charge_capacity : design;
+  if (full > 0 && full !== UNKNOWN) {
+    if (present === UNKNOWN || !(present > 0)) return null; // 有基准但当前电量未知
+    return `电量 ${Math.min(100, Math.round((present / full) * 100))}%`;
   }
   if (present > 0 && present !== UNKNOWN) return `电池 ${(present / 10).toFixed(1)}Wh`;
   return null; // 只报"有电池"不报数值（如 Redmi K80 系列）
