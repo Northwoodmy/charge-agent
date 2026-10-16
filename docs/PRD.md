@@ -242,9 +242,21 @@ Agent 对话：用户 → Kimi/DeepSeek API → tool-calling → MCP 执行 → 
 
 派生：功率 W = V×A/1e6；本次 Wh = Q(µC)/1e6 × V / 3600。
 
-### 8.2 协议码（实测映射）
+### 8.2 协议码（官方枚举，来自 IonBridge 固件 SW356x config_types.h）
 
-255=未握手 16=PD3.1/PPS 7=UFCS；其余按官方码表扩展。
+| 码 | 协议 | 码 | 协议 |
+|---|---|---|---|
+| 0 | 未充电 | 11 | TFCP |
+| 1 | QC2.0 | 12 | UFCS |
+| 2 | QC3.0 | 13 | PE 1.0 |
+| 3 | QC3+ | 14 | PE 2.0 |
+| 4 | SFCP | 15 | PD 固定 5V |
+| 5 | AFC | 16 | PD 固定高压 |
+| 6 | FCP | 17 | PD SPR AVS |
+| 7 | SCP | 18 | PD PPS |
+| 8 | VOOC 1.0 | 19 | PD EPR 高压 |
+| 9 | VOOC 4.0 | 20 | PD AVS |
+| 10 | SuperVOOC 2.0 | 255 | 未充电 |
 
 ### 8.3 主要 REST API
 
