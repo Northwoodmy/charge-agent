@@ -68,13 +68,67 @@ function positionWindow() {
 
 let showGuard = false; // 防止弹窗瞬间的 blur 把窗口立刻收走
 
+// ── 桌面悬浮迷你窗（钉在桌面角落的实时功率窗）──
+let miniWin = null;
+const MINI_POS = path.join(os.homedir(), 'Library/Application Support/charge-agent/mini-pos.json');
+const MINI_ENABLED = path.join(os.homedir(), 'Library/Application Support/charge-agent/.mini-enabled');
+
+function createMiniWindow() {
+  miniWin = new BrowserWindow({
+    width: 320,
+    height: 206,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    hasShadow: false,
+    icon: wordmarkDarkBar,
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  });
+  miniWin.setAlwaysOnTop(true, 'floating');
+  miniWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
+  // 恢复上次位置
+  try {
+    const pos = JSON.parse(fs.readFileSync(MINI_POS, 'utf-8'));
+    if (Array.isArray(pos) && pos.length === 2) miniWin.setPosition(pos[0], pos[1]);
+  } catch {}
+  miniWin.loadURL(`${BASE_URL}/#mini`);
+  // 自适应内容高度，杜绝裁切/错位
+  miniWin.webContents.on('did-finish-load', () => {
+    setTimeout(() => {
+      miniWin?.webContents.executeJavaScript(
+        `Math.ceil(document.querySelector('.mini-card')?.getBoundingClientRect().height || 0)`
+      ).then((h) => {
+        if (h > 0) miniWin.setContentSize(320, h + 12);
+      }).catch(() => {});
+    }, 300);
+  });
+  let saveTimer = null;
+  miniWin.on('moved', () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      try { fs.writeFileSync(MINI_POS, JSON.stringify(miniWin.getPosition())); } catch {}
+    }, 400);
+  });
+  miniWin.on('closed', () => { miniWin = null; });
+}
+
+function toggleMiniWindow() {
+  if (miniWin) { miniWin.close(); return false; }
+  createMiniWindow();
+  return true;
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 420,
     height: 720,
     show: false,
     frame: false,
-    resizable: true,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
     roundedCorners: true,
     icon: wordmarkDarkBar,
     webPreferences: { contextIsolation: true, nodeIntegration: false },
@@ -88,7 +142,7 @@ function createWindow() {
 
 function showWindow() {
   if (!win) createWindow();
-  positionWindow();
+  positionWindow(); // 弹窗固定出现在托盘图标下方
   showGuard = true;
   win.show();
   win.focus();
@@ -187,6 +241,15 @@ app.whenReady().then(() => {
   mlog("[MAIN] ready isDev:", isDev);
   if (!isDev && app.dock) app.dock.hide(); // 打包版隐藏 Dock 图标（纯菜单栏应用）
   enableAutoStartFirstRun();
+  // 上次开启过悬浮窗则自动恢复：等后端就绪再建窗（否则页面加载失败、透明窗隐形）
+  if (fs.existsSync(MINI_ENABLED)) {
+    const tryCreate = (left) => {
+      fetch(`http://127.0.0.1:${BACKEND_PORT}/api/config`)
+        .then(() => createMiniWindow())
+        .catch(() => { if (left > 0) setTimeout(() => tryCreate(left - 1), 800); });
+    };
+    tryCreate(25);
+  }
 
   startBackend();
 
@@ -196,6 +259,12 @@ app.whenReady().then(() => {
   nativeTheme.on('updated', () => { lastTrayKey = null; updateTrayDisplay(lastTotalW, lastOnline); });
   // 右键菜单（macOS 上 setContextMenu 会让左键也弹菜单，所以改用手动 popUp）
   const contextMenu = Menu.buildFromTemplate([
+    { label: '桌面悬浮窗', type: 'checkbox', checked: fs.existsSync(MINI_ENABLED),
+      click: (item) => {
+        const on = toggleMiniWindow();
+        item.checked = on;
+        try { on ? fs.writeFileSync(MINI_ENABLED, '1') : fs.unlinkSync(MINI_ENABLED); } catch {}
+      } },
     { label: '在浏览器中打开完整页面', click: () => shell.openExternal(FULL_URL) },
     { type: 'separator' },
     { label: '开机自启', type: 'checkbox', checked: autoStartEnabled(),

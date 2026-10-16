@@ -346,3 +346,69 @@ details.system td:first-child { color: var(--ink); }
 .pp-agent-input .btn { padding: 8px 16px; font-size: 13px; }
 
 .pp-version { text-align: center; font-size: 10.5px; color: var(--muted); opacity: 0.7; padding: 2px 0 6px; font-family: var(--mono); letter-spacing: 0.08em; }
+
+
+/* ─────────────────────────────────────────────
+   桌面悬浮迷你窗（#mini）：Candy 风格仪表盘
+   ───────────────────────────────────────────── */
+body:has(.mini) { background: transparent !important; margin: 0; }
+body:has(.mini) #root::before { content: none !important; }  /* 关掉弹窗箭头 */
+body:has(.mini) #root { max-width: none; margin: 0; padding: 0; }
+
+.mini { display: flex; -webkit-app-region: drag; user-select: none; }
+.mini-card {
+  position: relative; flex: 1; margin: 6px; padding: 10px 14px 10px;
+  background: rgba(255, 254, 249, 0.94);
+  border: 1px solid rgba(22, 22, 19, 0.14); border-radius: 16px;
+  display: flex; flex-direction: column; gap: 6px;
+  backdrop-filter: blur(10px);
+}
+.mini-close {
+  position: absolute; top: 4px; right: 8px;
+  border: none; background: none; font-size: 15px; color: var(--muted);
+  cursor: pointer; -webkit-app-region: no-drag; padding: 4px 6px; line-height: 1;
+  opacity: 0.35; transition: opacity 0.15s;
+}
+.mini-card:hover .mini-close { opacity: 1; }
+.mini-close:hover { color: var(--red-dark); }
+
+.mini-head { display: flex; align-items: center; justify-content: space-between; }
+.mini-head .wordmark { height: 16px; }
+.mini-head-right { display: flex; align-items: center; gap: 5px; }
+.mini-head-label { font-size: 10.5px; color: var(--muted); letter-spacing: 0.05em; }
+
+.mini-body { display: flex; align-items: center; gap: 12px; }
+.mini-left { flex: 1; min-width: 0; }
+.mini-num {
+  font-family: var(--mono); font-size: 34px; font-weight: 700; line-height: 1;
+  letter-spacing: -1px; font-variant-numeric: tabular-nums;
+}
+.mini-num small { font-size: 14px; color: var(--muted); font-weight: 500; margin-left: 2px; }
+.mini-caption { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.mini-sub { font-size: 10.5px; color: var(--muted); font-family: var(--mono); margin-top: 2px; opacity: 0.8; }
+
+.mini-gauge { width: 62px; height: 62px; flex-shrink: 0; }
+.mini-gauge-text { font-family: var(--mono); font-size: 12.5px; font-weight: 700; fill: var(--ink); }
+
+.mini-ports { display: flex; gap: 6px; }
+.mini-port {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 5px 2px; border-radius: 8px; background: var(--paper);
+  border: 1px solid rgba(22, 22, 19, 0.06); min-width: 0;
+  pointer-events: none; /* 纯展示，不可交互 */
+}
+.mini-port.on { background: var(--red-soft); border-color: rgba(236, 86, 49, 0.35); }
+.mini-port-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; opacity: 0.28; transition: opacity 0.3s; }
+.mini-port.on .mini-port-dot { opacity: 1; box-shadow: 0 0 6px rgba(236, 86, 49, 0.5); }
+.mini-port.closed .mini-port-name { color: var(--muted); }
+.mini-port-name { font-size: 10.5px; font-weight: 600; }
+.mini-port-w { font-family: var(--mono); font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.mini-port.on .mini-port-w { color: var(--red-dark); font-weight: 700; }
+
+/* 弹窗内容拉伸填满固定高度：Agent 区弹性扩展，消除底部空白 */
+.pp { min-height: 100vh; }
+.pp-agent { min-height: 0; }
+
+/* 弹窗标题区可拖动（无边框窗口靠此移动），控件保持可交互 */
+.pp-head { -webkit-app-region: drag; }
+.pp-head .chip, .pp-head .btn-icon, .pp-head select { -webkit-app-region: no-drag; }

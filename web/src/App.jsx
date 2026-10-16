@@ -705,6 +705,69 @@ function PopoverApp() {
 }
 
 export default function App() {
-  const isPopover = window.location.hash.includes('popover');
-  return isPopover ? <PopoverApp /> : <FullApp />;
+  const hash = window.location.hash;
+  if (hash.includes('mini')) return <MiniApp />;
+  if (hash.includes('popover')) return <PopoverApp />;
+  return <FullApp />;
+}
+
+// ─────────────────────────────────────────────
+// 桌面悬浮迷你窗（#mini）：置顶小卡片，500ms 实时
+// ─────────────────────────────────────────────
+function MiniApp() {
+  const [status, setStatus] = React.useState(null);
+  React.useEffect(() => {
+    const t = setInterval(() => api.status().then(setStatus).catch(() => {}), 500);
+    api.status().then(setStatus).catch(() => {});
+    return () => clearInterval(t);
+  }, []);
+
+  const d = status?.data;
+  const sorted = d?.ports.slice().sort((a, b) => (a.type === 'A') - (b.type === 'A')) || [];
+  const pct = d ? Math.min(100, (d.totalW / d.budgetTotalW) * 100) : 0;
+  // 环形仪表参数
+  const R = 24, CIRC = 2 * Math.PI * R;
+
+  return (
+    <div className="mini">
+      <div className="mini-card">
+        <button className="mini-close" title="关闭悬浮窗" onClick={() => window.close()}>×</button>
+        <div className="mini-head">
+          <img src="/brand/xiaodianpin.png" alt="小电拼" className="wordmark" />
+          <span className="mini-head-right">
+            <span className={`dot ${status?.online ? '' : 'off'}`}></span>
+            <span className="mini-head-label">{status?.online ? '在线' : '离线'}</span>
+          </span>
+        </div>
+        <div className="mini-body">
+          <div className="mini-left">
+            <div className="mini-num">{d ? d.totalW : '--'}<small> W</small></div>
+            <div className="mini-caption">整机实时输出</div>
+            <div className="mini-sub">{d ? `活跃 ${d.chargingPorts}/5 口` : '—'}</div>
+          </div>
+          <svg className="mini-gauge" viewBox="0 0 64 64">
+            <circle cx="32" cy="32" r={R} fill="none" strokeWidth="7"
+              style={{ stroke: 'var(--paper-deep)' }} />
+            <circle
+              cx="32" cy="32" r={R} fill="none" strokeWidth="7" strokeLinecap="round"
+              strokeDasharray={`${(pct / 100) * CIRC} ${CIRC}`}
+              transform="rotate(-90 32 32)"
+              style={{ stroke: 'var(--red)' }}
+            />
+            <text x="32" y="36" textAnchor="middle" className="mini-gauge-text">
+              {Math.round(pct)}%
+            </text>
+          </svg>
+        </div>
+        <div className="mini-ports">
+          {sorted.map((p) => (
+            <div key={p.idx} className={`mini-port ${p.attached ? 'on' : ''} ${p.active ? '' : 'closed'}`} title={`${p.name}${p.attached ? ` ${p.powerW}W` : p.active ? ' 空闲' : ' 已关闭'}`}>
+              <span className="mini-port-dot" style={{ background: PORT_COLORS[p.idx] }} />
+              <span className="mini-port-name">{p.name}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
