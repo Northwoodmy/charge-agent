@@ -47,13 +47,21 @@ app.get('/api/history', (req, res) => {
 
 app.get('/api/stats', (req, res) => {
   const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
-  const rows = store.getHistory(0, 24 * 60).concat(
-    [1, 2, 3, 4].flatMap((p) => store.getHistory(p, 24 * 60))
-  ).filter((r) => r.ts >= startOfDay.getTime());
-  // 采样周期约 10s → 能量 ≈ Σ P × Δt
-  const wh = rows.reduce((s, r) => s + r.power_w * 10, 0) / 3600;
-  const activeSamples = new Set(rows.filter((r) => r.power_w > 0.5).map((r) => r.port)).size;
-  res.json({ ok: true, todayWh: Math.round(wh * 10) / 10, activePortsToday: activeSamples });
+  // 按口分组、按时间排序，用相邻采样时间差积分：Σ P × Δt（Δt 封顶 30s，防空档高估）
+  // 采样密度不固定（历史窗口重叠/早期高频写入），固定 10s 假设会失真
+  let wh = 0;
+  const activePorts = new Set();
+  for (let port = 0; port <= 4; port++) {
+    const rows = store.getHistory(port, 24 * 60).filter((r) => r.ts >= startOfDay.getTime());
+    let prev = null;
+    for (const r of rows) {
+      const dt = prev == null ? 10_000 : Math.min(r.ts - prev, 30_000);
+      if (dt > 0) wh += r.power_w * (dt / 1000);
+      prev = r.ts;
+      if (r.power_w > 0.5) activePorts.add(port);
+    }
+  }
+  res.json({ ok: true, todayWh: Math.round((wh / 3600) * 10) / 10, activePortsToday: activePorts.size });
 });
 
 app.get('/api/events', (req, res) => {
