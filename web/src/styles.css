@@ -218,6 +218,10 @@ select.chip { background: var(--white); cursor: pointer; font: inherit; }
 /* ── 控制面板 ── */
 .ctrl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
 .ctrl-group h3 { font-size: 13px; margin: 0 0 10px; color: var(--muted); font-weight: 600; }
+/* 带行标签的控制行：标签固定宽，按钮排右 */
+.ctrl-row { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+.ctrl-row-label { width: 58px; flex-shrink: 0; font-size: 12px; color: var(--muted); }
+.ctrl-row .btn-row { flex: 1; min-width: 0; }
 .btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .btn.sm { padding: 7px 14px; font-size: 13px; }
 .btn.sm.active { background: var(--ink); }

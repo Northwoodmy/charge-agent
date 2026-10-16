@@ -347,8 +347,8 @@ function fmtDisplay(raw) {
   try {
     const d = JSON.parse(raw);
     const bright = { '关': '屏幕已关闭', '低': '亮度：低', '中': '亮度：中', '高': '亮度：高' }[d.level] || `亮度：${d.level}`;
-    const mode = d.display_mode === '功率显示优先' ? '平时显示功率' : '平时显示动画';
-    const idle = { '流星': '待机跑流星', '落花': '待机跑落花', '康威的生命游戏': '待机玩生命游戏', '时间': '待机显示时间' }[d.idle_display] || `待机：${d.idle_display}`;
+    const mode = d.display_mode === '功率显示优先' ? '平时显示实时功率' : '平时循环动画';
+    const idle = { '流星': '待机画面流星', '落花': '待机画面落花', '康威的生命游戏': '待机画面生命游戏', '时间': '待机画面时钟' }[d.idle_display] || `待机画面：${d.idle_display}`;
     const chime = d.hourly_chime ? '整点会闪屏报时' : '整点不打扰';
     return `当前：${bright} · ${mode} · ${idle} · ${chime}`;
   } catch { return '当前：读取失败'; }
@@ -392,7 +392,7 @@ function ControlPanel() {
   return (
     <div className="section">
       <h2>温控与屏幕</h2>
-      <div className="hint">直接调用官方 MCP，不经过大模型。下方显示的是设备当前真实状态。</div>
+      <div className="hint">设置直接下发到设备（不经 AI），状态实时回读——高亮的按钮就是设备当前的真值。</div>
       <div className="ctrl-grid">
         <div className="ctrl-group">
           <h3>温控模式</h3>
@@ -404,24 +404,36 @@ function ControlPanel() {
         </div>
         <div className="ctrl-group">
           <h3>状态屏</h3>
-          <div className="btn-row">
-            {['关', '低', '中', '高'].map((lv) => (
-              <button key={lv} className={`btn sm ghost ${level === lv ? 'active' : ''}`} onClick={() => act(`屏幕亮度「${lv}」`, () => api.control('set_display_intensity', { level: lv }))}>{lv}</button>
-            ))}
+          <div className="ctrl-row">
+            <span className="ctrl-row-label">亮度</span>
+            <div className="btn-row">
+              {['关', '低', '中', '高'].map((lv) => (
+                <button key={lv} className={`btn sm ghost ${level === lv ? 'active' : ''}`} onClick={() => act(`屏幕亮度「${lv}」`, () => api.control('set_display_intensity', { level: lv }))}>{lv}</button>
+              ))}
+            </div>
           </div>
-          <div className="btn-row">
-            {['待机动画优先', '功率显示优先'].map((m) => (
-              <button key={m} className={`btn sm ghost ${dispMode === m ? 'active' : ''}`} onClick={() => act(`屏显模式「${m}」`, () => api.control('set_status_display_mode', { mode: m }))}>{m === '功率显示优先' ? '功率优先' : '动画优先'}</button>
-            ))}
+          <div className="ctrl-row">
+            <span className="ctrl-row-label">平时显示</span>
+            <div className="btn-row">
+              {['待机动画优先', '功率显示优先'].map((m) => (
+                <button key={m} className={`btn sm ghost ${dispMode === m ? 'active' : ''}`} onClick={() => act(`屏显模式「${m}」`, () => api.control('set_status_display_mode', { mode: m }))}>{m === '功率显示优先' ? '实时功率' : '循环动画'}</button>
+              ))}
+            </div>
           </div>
-          <div className="btn-row">
-            {['流星', '落花', '康威的生命游戏', '时间'].map((s) => (
-              <button key={s} className={`btn sm ghost ${idleDisp === s ? 'active' : ''}`} onClick={() => act(`待机显示「${s}」`, () => api.control('set_idle_display', { idle_display: s }))}>{s === '康威的生命游戏' ? '生命游戏' : s}</button>
-            ))}
+          <div className="ctrl-row">
+            <span className="ctrl-row-label">待机画面</span>
+            <div className="btn-row">
+              {['流星', '落花', '康威的生命游戏', '时间'].map((s) => (
+                <button key={s} className={`btn sm ghost ${idleDisp === s ? 'active' : ''}`} onClick={() => act(`待机显示「${s}」`, () => api.control('set_idle_display', { idle_display: s }))}>{s === '康威的生命游戏' ? '生命游戏' : s}</button>
+              ))}
+            </div>
           </div>
-          <div className="btn-row">
-            <button className={`btn sm ghost ${chime === true ? 'active' : ''}`} onClick={() => act('整点报时开', () => api.control('set_hourly_chime', { enabled: true }))}>报时开</button>
-            <button className={`btn sm ghost ${chime === false ? 'active' : ''}`} onClick={() => act('整点报时关', () => api.control('set_hourly_chime', { enabled: false }))}>报时关</button>
+          <div className="ctrl-row">
+            <span className="ctrl-row-label">整点报时</span>
+            <div className="btn-row">
+              <button className={`btn sm ghost ${chime === true ? 'active' : ''}`} onClick={() => act('打开整点报时', () => api.control('set_hourly_chime', { enabled: true }))}>开启</button>
+              <button className={`btn sm ghost ${chime === false ? 'active' : ''}`} onClick={() => act('关闭整点报时', () => api.control('set_hourly_chime', { enabled: false }))}>关闭</button>
+            </div>
           </div>
           <div className="ctrl-status">{info.disp ? fmtDisplay(info.disp) : '读取中…'}</div>
         </div>
