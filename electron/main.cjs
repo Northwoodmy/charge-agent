@@ -222,18 +222,24 @@ function startBackend() {
 }
 
 // ── 在线升级（GitHub Releases，electron-updater）──
+// 手动触发：不自动检查，用户从托盘菜单点「检查更新」
 let autoUpdater = null;
 try { ({ autoUpdater } = require('electron-updater')); } catch { autoUpdater = null; }
-let updateState = null; // {status: 'downloading'|'ready', version}
+let updateState = null;   // {status: 'downloading'|'ready', version}
+let checkingUpdate = false;
 
 function buildTrayMenu() {
   const items = [];
-  if (updateState) {
-    items.push(updateState.status === 'ready'
-      ? { label: `重启安装更新 v${updateState.version}`, click: () => { app.isQuitting = true; autoUpdater.quitAndInstall(); } }
-      : { label: `发现新版本 v${updateState.version}，下载中…`, enabled: false });
-    items.push({ type: 'separator' });
+  if (updateState?.status === 'ready') {
+    items.push({ label: `重启安装更新 v${updateState.version}`, click: () => { app.isQuitting = true; autoUpdater.quitAndInstall(); } });
+  } else if (updateState?.status === 'downloading') {
+    items.push({ label: `新版本 v${updateState.version} 下载中…`, enabled: false });
+  } else if (checkingUpdate) {
+    items.push({ label: '正在检查更新…', enabled: false });
+  } else {
+    items.push({ label: '检查更新', click: () => manualCheckUpdate() });
   }
+  items.push({ type: 'separator' });
   items.push(
     { label: '桌面悬浮窗', type: 'checkbox', checked: fs.existsSync(MINI_ENABLED),
       click: (item) => {
@@ -261,12 +267,18 @@ function updateNotify(title, body, onClick) {
 
 function setupUpdater() {
   if (isDev || !autoUpdater) return;
-  autoUpdater.autoDownload = true;
+  autoUpdater.autoDownload = true; // 仅手动检查后触发下载
   autoUpdater.on('update-available', (info) => {
     updateState = { status: 'downloading', version: info.version };
     mlog('[UPDATE] 发现新版本:', info.version);
     rebuildTrayMenu();
     updateNotify('发现新版本 v' + info.version, '正在后台下载，完成后会提醒你');
+  });
+  autoUpdater.on('update-not-available', () => {
+    mlog('[UPDATE] 已是最新');
+    updateNotify('已是最新版本', `当前 v${app.getVersion()}，无需更新`);
+    checkingUpdate = false;
+    rebuildTrayMenu();
   });
   autoUpdater.on('update-downloaded', (info) => {
     updateState = { status: 'ready', version: info.version };
@@ -275,9 +287,24 @@ function setupUpdater() {
     updateNotify('新版本 v' + info.version + ' 已就绪', '点击此通知立即重启升级，或稍后在托盘菜单操作',
       () => { app.isQuitting = true; autoUpdater.quitAndInstall(); });
   });
-  autoUpdater.on('error', (e) => mlog('[UPDATE] 错误:', String(e.message || e).slice(0, 300)));
-  autoUpdater.checkForUpdates().catch((e) => mlog('[UPDATE] 检查失败:', String(e.message || e).slice(0, 300)));
-  setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 4 * 3600 * 1000);
+  autoUpdater.on('error', (e) => {
+    mlog('[UPDATE] 错误:', String(e.message || e).slice(0, 300));
+    checkingUpdate = false;
+    updateState = null;
+    rebuildTrayMenu();
+  });
+}
+
+function manualCheckUpdate() {
+  if (!autoUpdater || checkingUpdate || updateState) return;
+  checkingUpdate = true;
+  rebuildTrayMenu();
+  autoUpdater.checkForUpdates().catch((e) => {
+    mlog('[UPDATE] 检查失败:', String(e.message || e).slice(0, 300));
+    checkingUpdate = false;
+    rebuildTrayMenu();
+    updateNotify('检查更新失败', '请检查网络后重试');
+  });
 }
 
 // ── 开机自启（登录项，签名应用可用）──
