@@ -20,6 +20,22 @@ if (fs.existsSync(samplesPath)) {
     samples = fs.readFileSync(samplesPath, 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   } catch { samples = []; }
 }
+// 存量清洗：历史接口的滑动窗口曾导致同一采样重复入库，按 (port,ts) 去重
+{
+  const seen = new Set();
+  const deduped = samples.filter((r) => {
+    const k = r.port + '-' + r.ts;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  if (deduped.length !== samples.length) {
+    const removed = samples.length - deduped.length;
+    samples = deduped;
+    try { fs.writeFileSync(samplesPath, samples.map((r) => JSON.stringify(r)).join('\n') + (samples.length ? '\n' : '')); } catch {}
+    console.log(`[db] 历史采样去重：移除 ${removed} 条重复`);
+  }
+}
 let samplesDirtyCount = 0;
 
 // ── 会话 / KV：整文件 JSON ──

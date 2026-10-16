@@ -170,7 +170,10 @@ async function tickMetrics() {
   }
 }
 
+let lastSampleTs = 0;
+let nextLastTs = 0;
 async function tickHistory() {
+  nextLastTs = 0;
   if (!state.online) return;
   try {
     const raw = await fetchDevice(`${config.deviceBaseUrl}/porthistoryz`);
@@ -186,20 +189,23 @@ async function tickHistory() {
         power_w: Math.round(((s.voltage * s.current) / 1_000_000) * 100) / 100,
       })),
     }));
-    // 写入 SQLite：每个采样点一条（仅记录有功率或已连接的口，控制体积）
+    // 写入历史：只追加时间戳晚于上次入库的采样（设备返回滑动窗口，避免重叠重复）
     for (const p of raw.ports) {
-      for (const s of p.samples) {
+      p.samples.forEach((s, i) => {
+        const ts = now - (p.samples.length - 1 - i) * period;
+        if (ts <= lastSampleTs) return;
         const powerW = (s.voltage * s.current) / 1_000_000;
         if (powerW > 0.05) {
           rows.push({
-            ts: now - (p.samples.length - 1 - p.samples.indexOf(s)) * period,
-            port: p.port, voltage_mv: s.voltage, current_ma: s.current,
+            ts, port: p.port, voltage_mv: s.voltage, current_ma: s.current,
             power_w: Math.round(powerW * 100) / 100, attached: 1,
           });
         }
-      }
+        if (ts > nextLastTs) nextLastTs = ts;
+      });
     }
     if (rows.length) store.addSamples(rows);
+    if (nextLastTs > lastSampleTs) lastSampleTs = nextLastTs;
   } catch { /* 历史采集失败不影响主流程 */ }
 }
 
