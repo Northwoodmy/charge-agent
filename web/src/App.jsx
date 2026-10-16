@@ -15,7 +15,7 @@ function Header({ status, mcp, onOpenSettings }) {
   return (
     <div className="header">
       <div className="brand">
-        <img src="/brand/xiaodianpin.png" alt="小电拼" className="wordmark" />
+        <img src="/brand/xiaodianpin.png" alt="小电拼" className="wordmark" onError={(e) => { e.currentTarget.outerHTML = '<b style="font-size:17px">小电拼</b>'; }} />
       </div>
       <div>
         <h1>充电管家</h1>
@@ -192,6 +192,7 @@ function Overview({ status }) {
 
 function PortCard({ port, onToggle }) {
   const [busy, setBusy] = React.useState(false);
+  const [showDetail, setShowDetail] = React.useState(false);
   const toggle = async () => {
     setBusy(true);
     try {
@@ -204,8 +205,11 @@ function PortCard({ port, onToggle }) {
     <div className={`port-card ${port.attached ? 'charging' : ''} ${closed ? 'closed' : ''}`}>
       <div className="port-head">
         <span className="port-name">{port.name}<span className="type">· USB-{port.type}</span></span>
-        <span className={`badge ${port.attached ? 'on' : ''} ${closed ? 'closed' : ''}`}>
-          {closed ? '已关闭' : port.attached ? '充电中' : '空闲'}
+        <span className="port-head-right">
+          <button className="port-detail-btn" onClick={() => setShowDetail(true)}>详情</button>
+          <span className={`badge ${port.attached ? 'on' : ''} ${closed ? 'closed' : ''}`}>
+            {closed ? '已关闭' : port.attached ? '充电中' : '空闲'}
+          </span>
         </span>
       </div>
       <div className="port-power">{port.powerW}<small> W</small></div>
@@ -244,6 +248,88 @@ function PortCard({ port, onToggle }) {
           {busy ? '执行中…' : `开启 ${port.name} 端口`}
         </button>
       )}
+      {showDetail && <PortDetailModal port={port} onClose={() => setShowDetail(false)} />}
+    </div>
+  );
+}
+
+// ── 端口详情弹层：PD 协商 + 线材信息 + 设备端历史 ──
+function PortDetailModal({ port, onClose }) {
+  const [pd, setPd] = React.useState(null);
+  const [stats, setStats] = React.useState(null);
+  const [err, setErr] = React.useState('');
+
+  React.useEffect(() => {
+    Promise.all([
+      api.query('get_port_pd_status', {}).catch(() => null),
+      api.query('get_port_stats', { port: port.no }).catch(() => null),
+    ]).then(([pdRes, stRes]) => {
+      try {
+        const all = JSON.parse(pdRes?.result || 'null');
+        setPd(all?.ports?.find((x) => x.port === port.no) || null);
+      } catch { setPd(null); }
+      try {
+        setStats(JSON.parse(stRes?.result || 'null'));
+      } catch { setStats(null); }
+    }).catch((e) => setErr(String(e.message || e)));
+  }, [port.no]);
+
+  // 设备端历史 sparkline
+  const samples = stats?.samples || [];
+  const pts = samples.map((s) => s.power_mw / 1000);
+  const max = Math.max(...pts, 1);
+  const W = 440, H = 60;
+  const path = pts.length > 1
+    ? pts.map((v, i) => `${(i / (pts.length - 1)) * W},${H - (v / max) * (H - 6)}`).join(' ')
+    : '';
+
+  return (
+    <div className="modal-mask" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h2>{port.name} 口详情</h2>
+        {err && <div className="form-msg">读取失败：{err}</div>}
+        {!pd && !err && <div className="form-msg">读取中…</div>}
+        {pd && !pd.cable_brand_zh && !pd.pd_revision && (
+          <div className="form-msg">该口未连接设备，暂无协商数据</div>
+        )}
+        {pd && (pd.pd_revision || pd.cable_brand_zh) && (
+          <>
+            <div className="detail-group">
+              <h3>充电协商</h3>
+              <table className="detail-table">
+                <tbody>
+                  <tr><td>PD 版本</td><td>{pd.pd_revision || '—'}</td></tr>
+                  <tr><td>当前工作点</td><td>{pd.operating_voltage ? `${pd.operating_voltage / 1000}V · ${pd.operating_current}mA` : '—'}</td></tr>
+                  {pd.sink_maximum_pdp > 0 && <tr><td>设备需求功率</td><td>峰值 {pd.sink_maximum_pdp}W · 典型 {pd.sink_operational_pdp}W</td></tr>}
+                  <tr><td>PPS 快充</td><td>{pd.pps_charging_supported ? '支持' : '不支持'}</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div className="detail-group">
+              <h3>线材</h3>
+              <table className="detail-table">
+                <tbody>
+                  <tr><td>品牌</td><td>{pd.cable_brand_zh || '未知'}</td></tr>
+                  <tr><td>E-Marker 芯片</td><td>{pd.has_emarker ? '有（正规快充线）' : '无'}</td></tr>
+                  <tr><td>数据速率</td><td>{pd.cable_usb_highest_speed || '—'}</td></tr>
+                  <tr><td>EPR（48V）能力</td><td>{pd.cable_epr_mode_capable ? '支持' : '不支持'}</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+        {samples.length > 0 && (
+          <div className="detail-group">
+            <h3>设备端历史（{stats.count} 个采样 · 功率 W）</h3>
+            <svg viewBox={`0 0 ${W} ${H}`} className="detail-spark">
+              <polyline points={path} fill="none" stroke="var(--red)" strokeWidth="1.5" />
+            </svg>
+          </div>
+        )}
+        <div className="form-actions">
+          <button className="btn" onClick={onClose}>关闭</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -296,9 +382,12 @@ function ControlPanel() {
   };
 
   // 解析当前值，用于按钮高亮
-  let tempMode = null, level = null;
+  let tempMode = null, level = null, dispMode = null, idleDisp = null, chime = null;
   try { tempMode = JSON.parse(info.temp || 'null')?.mode; } catch {}
-  try { level = JSON.parse(info.disp || 'null')?.level; } catch {}
+  try {
+    const d = JSON.parse(info.disp || 'null');
+    level = d?.level; dispMode = d?.display_mode; idleDisp = d?.idle_display; chime = d?.hourly_chime;
+  } catch {}
 
   return (
     <div className="section">
@@ -319,6 +408,20 @@ function ControlPanel() {
             {['关', '低', '中', '高'].map((lv) => (
               <button key={lv} className={`btn sm ghost ${level === lv ? 'active' : ''}`} onClick={() => act(`屏幕亮度「${lv}」`, () => api.control('set_display_intensity', { level: lv }))}>{lv}</button>
             ))}
+          </div>
+          <div className="btn-row">
+            {['待机动画优先', '功率显示优先'].map((m) => (
+              <button key={m} className={`btn sm ghost ${dispMode === m ? 'active' : ''}`} onClick={() => act(`屏显模式「${m}」`, () => api.control('set_status_display_mode', { mode: m }))}>{m === '功率显示优先' ? '功率优先' : '动画优先'}</button>
+            ))}
+          </div>
+          <div className="btn-row">
+            {['流星', '落花', '康威的生命游戏', '时间'].map((s) => (
+              <button key={s} className={`btn sm ghost ${idleDisp === s ? 'active' : ''}`} onClick={() => act(`待机显示「${s}」`, () => api.control('set_idle_display', { idle_display: s }))}>{s === '康威的生命游戏' ? '生命游戏' : s}</button>
+            ))}
+          </div>
+          <div className="btn-row">
+            <button className={`btn sm ghost ${chime === true ? 'active' : ''}`} onClick={() => act('整点报时开', () => api.control('set_hourly_chime', { enabled: true }))}>报时开</button>
+            <button className={`btn sm ghost ${chime === false ? 'active' : ''}`} onClick={() => act('整点报时关', () => api.control('set_hourly_chime', { enabled: false }))}>报时关</button>
           </div>
           <div className="ctrl-status">{info.disp ? fmtDisplay(info.disp) : '读取中…'}</div>
         </div>
@@ -481,10 +584,17 @@ function StatsBar({ status }) {
 
 function SystemDrawer({ status }) {
   const sys = status?.data?.system;
+  const [net, setNet] = React.useState(null);
+  React.useEffect(() => {
+    api.query('get_device_info', {}).then((r) => {
+      try { setNet(JSON.parse(r?.result || 'null')); } catch { setNet(null); }
+    }).catch(() => {});
+  }, []);
   if (!sys) return null;
+  const rssiText = net?.rssi != null ? `${net.rssi} dBm（${net.rssi > -60 ? '良好' : net.rssi > -70 ? '一般' : '偏弱'}）` : null;
   return (
     <details className="system">
-      <summary>系统细节（芯片 / 内存 / 任务）</summary>
+      <summary>系统细节（芯片 / 内存 / 网络）</summary>
       <div className="body">
         <table>
           <tbody>
@@ -492,6 +602,9 @@ function SystemDrawer({ status }) {
             <tr><td>IDF</td><td>{sys.idf_version}</td></tr>
             <tr><td>固件</td><td>{sys.app_version}（启动原因码 {sys.reset_reason}）</td></tr>
             <tr><td>空闲堆内存</td><td>{(sys.free_heap / 1024).toFixed(1)} KB</td></tr>
+            {net && <tr><td>Wi-Fi 网络</td><td>{net.ssid || '—'}</td></tr>}
+            {rssiText && <tr><td>信号强度</td><td>{rssiText}</td></tr>}
+            {net?.psn && <tr><td>设备 PSN</td><td>{net.psn}</td></tr>}
           </tbody>
         </table>
       </div>
@@ -554,7 +667,7 @@ function FullApp() {
       <AgentConsole settings={settings} />
       <SystemDrawer status={status} />
       <div className="footer">
-        <img src="/brand/candysign.png" alt="CANDYSIGN" className="footer-logo" />
+        <img src="/brand/candysign.png" alt="CANDYSIGN" className="footer-logo" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
         <div>ChargeAgent v{VERSION} · 数据来自本地 IonBridge + 官方云端 MCP · 用 <span className="heart">⚡</span> 和 FluxAI 自由流® 驱动</div>
       </div>
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} settings={settings} onSaved={reloadSettings} />
