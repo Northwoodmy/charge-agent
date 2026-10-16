@@ -191,6 +191,15 @@ function Overview({ status }) {
   );
 }
 
+// PD 电池信息格式化：能算百分比算百分比，只有容量就显示 Wh；读不到返回 null
+function fmtBatt(pd) {
+  if (!pd?.battery_present || !(pd.battery_present_capacity > 0)) return null;
+  if (pd.battery_design_capacity > 0) {
+    return `电量 ${Math.round((pd.battery_present_capacity / pd.battery_design_capacity) * 100)}%`;
+  }
+  return `电池 ${(pd.battery_present_capacity / 10).toFixed(1)}Wh`;
+}
+
 function PortCard({ port, onToggle, pdInfo }) {
   const [busy, setBusy] = React.useState(false);
   const [showDetail, setShowDetail] = React.useState(false);
@@ -227,9 +236,7 @@ function PortCard({ port, onToggle, pdInfo }) {
         {port.attached ? (
           <>
             {pdInfo?.device_name_zh && <span className="port-device">{pdInfo.device_name_zh}</span>}
-            {pdInfo?.battery_present && pdInfo.battery_design_capacity > 0 && (
-              <span className="port-batt">电量 {Math.round((pdInfo.battery_present_capacity / pdInfo.battery_design_capacity) * 100)}%</span>
-            )}
+            {fmtBatt(pdInfo) && <span className="port-batt">{fmtBatt(pdInfo)}</span>}
             <span>{port.protocol}</span>
             <span>已充 {fmtDur(port.durationS)}</span>
             <span>≈{port.sessionWh}Wh</span>
@@ -315,8 +322,8 @@ function PortDetailModal({ port, onClose }) {
                   <tr><td>当前工作点</td><td>{pd.operating_voltage ? `${pd.operating_voltage / 1000}V · ${pd.operating_current}mA` : '—'}</td></tr>
                   {pd.sink_maximum_pdp > 0 && <tr><td>设备需求功率</td><td>峰值 {pd.sink_maximum_pdp}W · 典型 {pd.sink_operational_pdp}W</td></tr>}
                   <tr><td>PPS 快充</td><td>{pd.pps_charging_supported ? '支持' : '不支持'}</td></tr>
-                  {pd.battery_present && pd.battery_design_capacity > 0 && (
-                    <tr><td>设备电池</td><td>{Math.round((pd.battery_present_capacity / pd.battery_design_capacity) * 100)}%（{{0: '充电中', 1: '放电', 2: '已充满'}[pd.battery_status] || '静置'}）</td></tr>
+                  {fmtBatt(pd) && (
+                    <tr><td>设备电池</td><td>{fmtBatt(pd)}（{{0: '充电中', 1: '放电', 2: '已充满'}[pd.battery_status] || '静置'}）</td></tr>
                   )}
                 </tbody>
               </table>
@@ -855,9 +862,7 @@ function PopoverApp() {
                   return (
                     <>
                       {pd.device_name_zh && <span className="pp-port-dev">{pd.device_name_zh}</span>}
-                      {pd.battery_present && pd.battery_design_capacity > 0 && (
-                        <span className="pp-port-batt">电量 {Math.round((pd.battery_present_capacity / pd.battery_design_capacity) * 100)}%</span>
-                      )}
+                      {fmtBatt(pd) && <span className="pp-port-batt">{fmtBatt(pd)}</span>}
                     </>
                   );
                 })()}
