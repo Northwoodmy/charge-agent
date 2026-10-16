@@ -42,7 +42,15 @@ export async function chat({ sessionId, message, provider: providerOverride }) {
     ...history.map((m) => {
       if (m.role === 'assistant') {
         const msg = { role: 'assistant', content: m.content };
-        if (m.tool_calls) msg.tool_calls = JSON.parse(m.tool_calls);
+        if (m.tool_calls) {
+          // 还原为 OpenAI 规范的 tool_calls（带 id/type/function）
+          const log = JSON.parse(m.tool_calls);
+          msg.tool_calls = log.map((t) => ({
+            id: t.id || `call_${t.ts || Math.random().toString(36).slice(2)}`,
+            type: 'function',
+            function: { name: t.name, arguments: JSON.stringify(t.args || {}) },
+          }));
+        }
         return msg;
       }
       if (m.role === 'tool') {
@@ -51,6 +59,20 @@ export async function chat({ sessionId, message, provider: providerOverride }) {
       return { role: 'user', content: m.content };
     }),
   ];
+
+  // 防御：assistan 的 tool_calls 若缺少对应 tool 响应（旧数据/异常中断），剥掉 tool_calls 只留文本
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role === 'assistant' && m.tool_calls) {
+      const ids = new Set(m.tool_calls.map((t) => t.id));
+      let j = i + 1;
+      while (j < messages.length && messages[j].role === 'tool') {
+        ids.delete(messages[j].tool_call_id);
+        j++;
+      }
+      if (ids.size > 0) delete m.tool_calls;
+    }
+  }
 
   // 注入实时上下文（放在 user 消息之后追加一条 system 上下文）
   messages.push({ role: 'system', content: buildContext() });
@@ -91,7 +113,7 @@ export async function chat({ sessionId, message, provider: providerOverride }) {
       messages.push(msg);
       for (const tc of msg.tool_calls) {
         const args = JSON.parse(tc.function.arguments || '{}');
-        toolLog.push({ name: tc.function.name, args, ts: Date.now() });
+        toolLog.push({ id: tc.id, name: tc.function.name, args, ts: Date.now() });
         let outcome;
         if (mcp.connected) {
           outcome = await mcp.callTool(tc.function.name, args);
@@ -113,7 +135,15 @@ export async function chat({ sessionId, message, provider: providerOverride }) {
     break;
   }
 
-  store.addMessage(sid, 'assistant', finalText, toolLog.length ? toolLog : null);
+  // 按 OpenAI 规范顺序落库：assistant(带 tool_calls) 在前，tool 响应在后
+  if (toolLog.length) {
+    store.addMessage(sid, 'assistant', finalText, toolLog);
+    for (const t of toolLog) {
+      store.addMessage(sid, 'tool', t.result || '(empty)', null, t.id);
+    }
+  } else {
+    store.addMessage(sid, 'assistant', finalText, null);
+  }
 
   return {
     sessionId: sid,
