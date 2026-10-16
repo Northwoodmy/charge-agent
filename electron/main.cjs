@@ -357,10 +357,18 @@ async function manualCheckUpdate(silent = false) {
   mlog(`[UPDATE] ${silent ? '自动' : '手动'}检查开始, 当前 v` + app.getVersion(), '代理:', UPDATE_PROXY);
   try {
     // 用 /releases/latest 的 302 Location 拿「最新标记」的版本：比 atom 实时、比 API 抗限流
-    const lr = await httpsTunnelRequest('github.com', '/Northwoodmy/charge-agent/releases/latest');
-    if (![301, 302, 303, 307, 308].includes(lr.status) || !lr.headers.location) {
-      throw new Error('查询最新版本 HTTP ' + lr.status);
+    // 瞬时网络抖动自动重试 3 次
+    let lr = null, lastErr = null;
+    for (let i = 0; i < 3; i++) {
+      try {
+        lr = await httpsTunnelRequest('github.com', '/Northwoodmy/charge-agent/releases/latest');
+        if ([301, 302, 303, 307, 308].includes(lr.status) && lr.headers.location) break;
+        lastErr = new Error('查询最新版本 HTTP ' + lr.status);
+        lr = null;
+      } catch (e) { lastErr = e; }
+      if (i < 2) await new Promise((r) => setTimeout(r, 2000));
     }
+    if (!lr) throw lastErr || new Error('查询最新版本失败');
     const m = lr.headers.location.match(/tag\/v?([0-9]+\.[0-9]+\.[0-9]+)/);
     if (!m) throw new Error('无法从 Location 解析版本: ' + lr.headers.location);
     const remote = m[1];
@@ -390,7 +398,7 @@ let downloadAttempt = 0; // 每次尝试唯一 ID：重定向/过期套接字的
 function downloadUpdate(version, url, total, depth = 0, offset = 0) {
   const myId = ++downloadAttempt;
   const active = () => myId === downloadAttempt;
-  if (depth > 8) return onDownloadError(new Error('重定向/续传次数过多'), active);
+  if (depth > 10) return onDownloadError(new Error('重定向/续传次数过多'), active, true);
   const outPath = path.join(os.homedir(), 'Library/Application Support/charge-agent/update-' + version + '.zip');
   const u = new UrlURL(url);
   mlog('[UPDATE] 下载:', u.hostname, depth ? `(第${Math.ceil(depth / 2)}次接续)` : '', '已收', Math.round(offset / 1048576) + 'MB');
@@ -401,16 +409,26 @@ function downloadUpdate(version, url, total, depth = 0, offset = 0) {
   socket.setTimeout(30_000, () => { socket.destroy(); onDownloadError(new Error('下载连接超时'), active); });
   let handshake = Buffer.alloc(0), tlsSock = null, fileOut = null, got = 0, lastLog = 0;
   let resHead = Buffer.alloc(0), headParsed = false;
+  let expected = 0; // Content-Length（本段）
+  let base = offset; // 本段起始偏移（服务器忽略 Range 回退 200 时清零重下）
 
-  const onDownloadError = (e, act) => {
+  const onDownloadError = (e, act, fatal = false) => {
     if (act && !act()) return; // 已被更新的尝试取代
+    const received = base + got;
+    // 有进度则断点续传；无进度且次数未满则原地重试；超限才报失败
+    if (!fatal && depth < 10) {
+      mlog(`[UPDATE] 下载中断(${String(e.message || e).slice(0, 60)})`, received > 0 ? `续传自 ${Math.round(received / 1048576)}MB` : '重新开始');
+      try { tlsSock?.removeAllListeners(); socket.removeAllListeners(); socket.destroy(); } catch {}
+      downloadAttempt++;
+      return downloadUpdate(version, url, total, depth + 1, received);
+    }
     mlog('[UPDATE] 下载失败:', String(e.message || e).slice(0, 200));
     try { fileOut?.close(); } catch {}
     try { fs.unlinkSync(outPath); } catch {}
     updateState = null;
     checkingUpdate = false;
     rebuildTrayMenu();
-    updateNotify('更新下载失败', String(e.message || '网络错误').slice(0, 120));
+    updateNotify('更新下载失败', '多次重试仍不成功，请检查网络后重新检查更新');
   };
 
   socket.on('data', (d) => {
@@ -430,7 +448,7 @@ function downloadUpdate(version, url, total, depth = 0, offset = 0) {
       const finishStream = () => {
         if (streamDone || !active()) return;
         streamDone = true;
-        const received = offset + got;
+        const received = base + got;
         // 代理掐断：按 Range 断点续传
         if (expected > 0 && got < expected && received < total) {
           mlog('[UPDATE] 连接中断:', Math.round(got / 1048576) + '/', Math.round(expected / 1048576) + 'MB，断点续传');
@@ -478,11 +496,16 @@ function downloadUpdate(version, url, total, depth = 0, offset = 0) {
             try { tlsSock.removeAllListeners(); socket.removeAllListeners(); socket.destroy(); } catch {}
             return downloadUpdate(version, new UrlURL(loc, url).toString(), total, depth + 1);
           }
-          if (status !== 200) return onDownloadError(new Error('下载 HTTP ' + status), active);
+          if (status !== 200 && status !== 206) return onDownloadError(new Error('下载 HTTP ' + status), active);
           headParsed = true;
           chunked = /chunked/i.test(text);
           expected = Number(/content-length:\s*(\d+)/i.exec(text)?.[1] || 0);
-          fileOut = fs.createWriteStream(outPath, offset > 0 ? { flags: 'a' } : {});
+          if (status === 200 && base > 0) {
+            // 服务器忽略 Range 返回全量：截断重下，避免追加重复数据
+            mlog('[UPDATE] 服务器忽略 Range，全量重下');
+            base = 0;
+          }
+          fileOut = fs.createWriteStream(outPath, base > 0 ? { flags: 'a' } : {});
           const rest = resHead.slice(he + 4);
           if (rest.length) chunked ? feedChunked(rest) : writeBody(rest);
           if (!chunked) got = rest.length;
