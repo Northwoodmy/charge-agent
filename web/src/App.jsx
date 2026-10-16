@@ -786,11 +786,27 @@ function PpAgent({ settings }) {
 function PopoverApp() {
   const [status, setStatus] = React.useState(null);
   const [settings, setSettings] = React.useState(null);
+  const [pdMap, setPdMap] = React.useState({});
 
   React.useEffect(() => {
     const t = setInterval(() => api.status().then(setStatus).catch(() => {}), 500);
     api.status().then(setStatus).catch(() => {});
     api.settings().then(setSettings).catch(() => {});
+    return () => clearInterval(t);
+  }, []);
+
+  // PD 协商快照（30s）：设备名/电池，读不到不显示
+  React.useEffect(() => {
+    const load = () => api.query('get_port_pd_status', {}).then((r) => {
+      try {
+        const all = JSON.parse(r?.result || 'null');
+        const map = {};
+        for (const p of all?.ports || []) map[p.port] = p;
+        setPdMap(map);
+      } catch {}
+    }).catch(() => {});
+    load();
+    const t = setInterval(load, 30000);
     return () => clearInterval(t);
   }, []);
 
@@ -832,7 +848,16 @@ function PopoverApp() {
             <span className="pp-port-dot" style={{ background: PORT_COLORS[p.idx] }} />
             <div className="pp-port-info">
               <b>{p.name}</b>
-              <span>{p.attached ? `${p.voltageV.toFixed(1)}V · ${p.currentA.toFixed(2)}A · ${p.protocol}` : p.active ? '空闲' : '已关闭'}</span>
+              <span>{p.attached ? (() => {
+                const pd = pdMap[p.no];
+                const parts = [`${p.voltageV.toFixed(1)}V · ${p.currentA.toFixed(2)}A`];
+                if (pd?.device_name_zh) parts.push(pd.device_name_zh);
+                else parts.push(p.protocol);
+                if (pd?.battery_present && pd.battery_design_capacity > 0) {
+                  parts.push(`电量${Math.round((pd.battery_present_capacity / pd.battery_design_capacity) * 100)}%`);
+                }
+                return parts.join(' · ');
+              })() : p.active ? '空闲' : '已关闭'}</span>
             </div>
             <div className="pp-port-right">
               <div className="pp-port-w">{p.powerW}<small> W</small></div>
