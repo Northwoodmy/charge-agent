@@ -39,6 +39,11 @@ jobs:
           CERT_P12: ${{ secrets.CERT_P12 }}
           CERT_PWD: ${{ secrets.CERT_PWD }}
 
+      - name: 清理同标签旧 Release（防 electron-builder 重复建草稿）
+        run: gh release delete "${{ github.ref_name }}" --yes || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: 构建前端 + 打包签名 + 发布到 Release
         run: npm run build && npx electron-builder --mac --publish always
         env:
