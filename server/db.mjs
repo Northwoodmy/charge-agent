@@ -1,0 +1,137 @@
+// ── 文件存储（JSON/JSONL，零依赖，兼容 Electron 内置 Node）──
+// 内存为主、磁盘持久化：samples 追加写 JSONL；会话与 KV 写 JSON
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// 打包模式：Electron 主进程通过环境变量指定可写数据目录（app.asar 内不可写）
+const dataDir = process.env.CHARGEAGENT_DATA_DIR || path.join(__dirname, '..', 'data');
+fs.mkdirSync(dataDir, { recursive: true });
+
+const samplesPath = path.join(dataDir, 'samples.jsonl');
+const chatPath = path.join(dataDir, 'chat.json');
+const kvPath = path.join(dataDir, 'kv.json');
+
+// ── 采样：内存索引 + JSONL 追加 ──
+let samples = []; // {ts,port,voltage_mv,current_ma,power_w,attached}
+if (fs.existsSync(samplesPath)) {
+  try {
+    samples = fs.readFileSync(samplesPath, 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  } catch { samples = []; }
+}
+let samplesDirtyCount = 0;
+
+// ── 会话 / KV：整文件 JSON ──
+let chat = { sessions: [], messages: {} };
+if (fs.existsSync(chatPath)) {
+  try { chat = JSON.parse(fs.readFileSync(chatPath, 'utf-8')); } catch { chat = { sessions: [], messages: {} }; }
+}
+let kv = {};
+if (fs.existsSync(kvPath)) {
+  try { kv = JSON.parse(fs.readFileSync(kvPath, 'utf-8')); } catch { kv = {}; }
+}
+
+let chatSaveTimer = null;
+function scheduleChatSave() {
+  if (chatSaveTimer) return;
+  chatSaveTimer = setTimeout(() => {
+    chatSaveTimer = null;
+    try { fs.writeFileSync(chatPath, JSON.stringify(chat)); } catch {}
+  }, 400);
+}
+function saveKV() {
+  try { fs.writeFileSync(kvPath, JSON.stringify(kv)); } catch {}
+}
+
+export const store = {
+  // 批量写入采样（追加 JSONL）
+  addSamples(rows) {
+    if (!rows.length) return;
+    samples.push(...rows);
+    samplesDirtyCount += rows.length;
+    if (samplesDirtyCount >= 200) {
+      // 攒一批再落盘，降低 IO
+      const chunk = samples.slice(-samplesDirtyCount);
+      try { fs.appendFileSync(samplesPath, chunk.map((r) => JSON.stringify(r)).join('\n') + '\n'); } catch {}
+      samplesDirtyCount = 0;
+    }
+  },
+
+  // 查询历史：某端口近 N 分钟（升序）
+  getHistory(port, minutes = 60) {
+    const since = Date.now() - minutes * 60_000;
+    return samples.filter((r) => r.port === port && r.ts >= since);
+  },
+
+  purge(keepDays) {
+    const cutoff = Date.now() - keepDays * 86_400_000;
+    const before = samples.length;
+    samples = samples.filter((r) => r.ts >= cutoff);
+    const removed = before - samples.length;
+    if (removed > 0) {
+      // 重写文件，释放空间
+      try { fs.writeFileSync(samplesPath, samples.map((r) => JSON.stringify(r)).join('\n') + (samples.length ? '\n' : '')); } catch {}
+      samplesDirtyCount = 0;
+    }
+    // 会话也做上限
+    if (chat.sessions.length > 50) {
+      const drop = new Set(chat.sessions.slice(0, chat.sessions.length - 50).map((s) => s.id));
+      chat.sessions = chat.sessions.slice(-50);
+      for (const id of drop) delete chat.messages[id];
+      scheduleChatSave();
+    }
+  },
+
+  // ── 会话 ──
+  createSession(id, title, provider, model) {
+    const now = Date.now();
+    chat.sessions.push({ id, title, provider, model, created_at: now, updated_at: now });
+    chat.messages[id] = [];
+    scheduleChatSave();
+  },
+  touchSession(id) {
+    const s = chat.sessions.find((x) => x.id === id);
+    if (s) { s.updated_at = Date.now(); scheduleChatSave(); }
+  },
+  listSessions() {
+    return [...chat.sessions].sort((a, b) => b.updated_at - a.updated_at);
+  },
+  addMessage(sessionId, role, content, toolCalls = null, toolCallId = null) {
+    if (!chat.messages[sessionId]) chat.messages[sessionId] = [];
+    const arr = chat.messages[sessionId];
+    arr.push({ id: arr.length + 1, session_id: sessionId, role, content, tool_calls: toolCalls ? JSON.stringify(toolCalls) : null, tool_call_id: toolCallId, ts: Date.now() });
+    if (arr.length > 500) chat.messages[sessionId] = arr.slice(-500);
+    scheduleChatSave();
+  },
+  getMessages(sessionId, limit = 200) {
+    const arr = chat.messages[sessionId] || [];
+    return arr.slice(-limit);
+  },
+
+  // ── KV 设置 ──
+  getKV(key, fallback = null) {
+    return key in kv ? kv[key] : fallback;
+  },
+  setKV(key, value) {
+    kv[key] = String(value);
+    saveKV();
+  },
+
+  // 进程退出前落盘
+  flush() {
+    try {
+      if (samplesDirtyCount > 0) {
+        const chunk = samples.slice(-samplesDirtyCount);
+        fs.appendFileSync(samplesPath, chunk.map((r) => JSON.stringify(r)).join('\n') + '\n');
+        samplesDirtyCount = 0;
+      }
+      fs.writeFileSync(chatPath, JSON.stringify(chat));
+      fs.writeFileSync(kvPath, JSON.stringify(kv));
+    } catch {}
+  },
+};
+
+process.on('exit', () => store.flush());
+process.on('SIGTERM', () => { store.flush(); process.exit(0); });
+process.on('SIGINT', () => { store.flush(); process.exit(0); });

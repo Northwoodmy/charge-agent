@@ -1,0 +1,9 @@
+node_modules/
+dist/
+release/
+.env
+*.log
+data/
+assets/tray/
+assets/brand/wordmark-*.png
+.DS_Store

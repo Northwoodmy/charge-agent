@@ -1,0 +1,57 @@
+{
+  "name": "charge-agent",
+  "version": "1.0.0",
+  "description": "小电拼充电管家 —— Candy 风格看板 + 双大模型（Kimi / DeepSeek）自然语言控制",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "concurrently -n server,web -c red,blue \"npm run server\" \"npm run web\"",
+    "server": "node server/index.mjs",
+    "web": "vite web",
+    "build": "vite build web",
+    "electron": "bash scripts/run-electron.sh",
+    "desktop": "concurrently -k -n server,web,desktop -c red,blue,green \"npm run server\" \"npm run web\" \"sleep 4 && npm run electron\"",
+    "pack": "npm run build && electron-builder --mac --dir",
+    "dist": "npm run build && electron-builder --mac",
+    "start": "NODE_ENV=production node server/index.mjs"
+  },
+  "dependencies": {
+    "concurrently": "^9.1.2",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "openai": "^4.77.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "uplot": "^1.6.31"
+  },
+  "devDependencies": {
+    "@electron/asar": "^4.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^34.0.0",
+    "electron-builder": "^26.15.3",
+    "vite": "^6.0.0"
+  },
+  "build": {
+    "appId": "com.chargeagent.app",
+    "productName": "ChargeAgent",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "server/**/*",
+      "web/dist/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        "dir"
+      ],
+      "icon": "assets/brand/bolt-coral.png"
+    }
+  }
+}
