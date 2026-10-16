@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 文档版本 | v1.1 |
+| 文档版本 | v1.2 |
 | 产品版本 | 1.0.0（持续迭代） |
 | 状态 | 已交付（as-built PRD） |
 | 目标平台 | macOS（Apple Silicon，arm64） |
@@ -123,6 +123,8 @@ Agent 对话：用户 → Kimi/DeepSeek API → tool-calling → MCP 执行 → 
 11. **无边框窗口的移动依赖页面 `-webkit-app-region: drag`**：弹窗标题行、悬浮窗整体声明拖动手柄，控件单独 `no-drag`。
 12. **窗口位置存的是 `[x,y]` 数组**：恢复时必须按数组判读（曾误用 `pos.x` 导致悬浮窗位置记忆失效）。
 13. **悬浮窗自动恢复须等后端就绪**（否则页面加载失败成透明幽灵窗）：探测 `/api/config` 成功后再建窗。
+14. **祖先元素带 transform 会使 fixed 定位改以该祖先为参照**（端口卡 hover 浮起导致弹窗尺寸抖动）：弹层一律 portal 到 body。
+15. **Agent 历史的 tool_calls 必须有紧随其后的 tool 响应**（OpenAI 规范），入库顺序为 assistant(工具声明)→tool 结果×N，缺响应的历史自动剥除工具声明。
 
 ---
 
@@ -167,8 +169,9 @@ Agent 对话：用户 → Kimi/DeepSeek API → tool-calling → MCP 执行 → 
 | 编号 | 需求 | 验收 |
 |---|---|---|
 | FR-4.1 | 温控模式：功率优先 / 温度优先，当前态高亮 | 状态文案人话化（如「跑满性能，机身会偏热」） |
-| FR-4.2 | 状态屏亮度：关/低/中/高，当前态高亮 | 读取失败时 15s 自动重试 |
-| FR-4.3 | 只展示可回读的官方能力（策略无可读接口故不做面板） | — |
+| FR-4.2 | 状态屏：亮度四档 + 屏显模式（循环动画/实时功率）+ 待机画面（流星/落花/生命游戏/时间）+ 整点报时开关，全部可读回高亮 | 读取失败时 15s 自动重试；行标签式布局 |
+| FR-4.3 | 只展示可回读的官方能力（策略无可读接口故不做面板，交给 Agent） | — |
+| FR-4.4 | 端口详情弹层（portal 挂 body，防 transform 抖动）：PD 协商（版本/工作点/设备需求功率/PPS）、线材体检（品牌/E-Marker/速率/EPR）、设备端历史功率曲线 | 未连接端口入口禁用置灰 |
 
 ### 5.5 Agent 控制台
 
@@ -242,7 +245,7 @@ Agent 对话：用户 → Kimi/DeepSeek API → tool-calling → MCP 执行 → 
 
 派生：功率 W = V×A/1e6；本次 Wh = Q(µC)/1e6 × V / 3600。
 
-### 8.2 协议码（官方枚举，来自 IonBridge 固件 SW356x config_types.h）
+### 8.2 协议码（官方枚举，来自 IonBridge 固件 SW356x config_types.h；界面显示英文规范名）
 
 | 码 | 协议 | 码 | 协议 |
 |---|---|---|---|
@@ -257,6 +260,9 @@ Agent 对话：用户 → Kimi/DeepSeek API → tool-calling → MCP 执行 → 
 | 8 | VOOC 1.0 | 19 | PD EPR HV |
 | 9 | VOOC 4.0 | 20 | PD AVS |
 | 10 | SuperVOOC 2.0 | 255 | Idle |
+
+### 8.2b 设备信息（get_device_info）
+SSID、RSSI 信号强度（dBm）、PSN、固件版本——系统抽屉展示网络质量。
 
 ### 8.3 主要 REST API
 
