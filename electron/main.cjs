@@ -382,8 +382,11 @@ async function manualCheckUpdate() {
 }
 
 // 经代理隧道下载 zip（解析响应头、跟随重定向、分块写盘带进度）
+let downloadAttempt = 0; // 每次尝试唯一 ID：重定向/过期套接字的事件一律作废
 function downloadUpdate(version, url, total, depth = 0) {
-  if (depth > 5) return onDownloadError(new Error('重定向过多'));
+  const myId = ++downloadAttempt;
+  const active = () => myId === downloadAttempt;
+  if (depth > 5) return onDownloadError(new Error('重定向过多'), active);
   const outPath = path.join(os.homedir(), 'Library/Application Support/charge-agent/update-' + version + '.zip');
   const u = new UrlURL(url);
   mlog('[UPDATE] 下载:', u.hostname, depth ? '(重定向)' : '', Math.round(total / 1048576) + 'MB');
@@ -391,11 +394,12 @@ function downloadUpdate(version, url, total, depth = 0) {
   const socket = net.connect(Number(px.port || 1082), px.hostname, () => {
     socket.write(`CONNECT ${u.hostname}:443 HTTP/1.1\r\nHost: ${u.hostname}:443\r\n\r\n`);
   });
-  socket.setTimeout(30_000, () => { socket.destroy(); onDownloadError(new Error('下载连接超时')); });
+  socket.setTimeout(30_000, () => { socket.destroy(); onDownloadError(new Error('下载连接超时'), active); });
   let handshake = Buffer.alloc(0), tlsSock = null, fileOut = null, got = 0, lastLog = 0;
   let resHead = Buffer.alloc(0), headParsed = false;
 
-  const onDownloadError = (e) => {
+  const onDownloadError = (e, act) => {
+    if (act && !act()) return; // 已被更新的尝试取代
     mlog('[UPDATE] 下载失败:', String(e.message || e).slice(0, 200));
     try { fileOut?.close(); } catch {}
     try { fs.unlinkSync(outPath); } catch {}
@@ -424,11 +428,13 @@ function downloadUpdate(version, url, total, depth = 0) {
           const status = Number((text.match(/HTTP\/1\.[01] (\d+)/) || [])[1] || 0);
           if ([301, 302, 303, 307, 308].includes(status)) {
             const loc = /location:\s*(\S+)/i.exec(text)?.[1];
-            try { socket.destroy(); } catch {}
-            if (!loc) return onDownloadError(new Error('重定向缺 Location'));
+            if (!loc) return onDownloadError(new Error('重定向缺 Location'), active);
+            // 作废本尝试：静默旧套接字，防止其 end/error 事件误伤新尝试
+            downloadAttempt++;
+            try { tlsSock.removeAllListeners(); socket.removeAllListeners(); socket.destroy(); } catch {}
             return downloadUpdate(version, new UrlURL(loc, url).toString(), total, depth + 1);
           }
-          if (status !== 200) return onDownloadError(new Error('下载 HTTP ' + status));
+          if (status !== 200) return onDownloadError(new Error('下载 HTTP ' + status), active);
           headParsed = true;
           fileOut = fs.createWriteStream(outPath);
           const rest = resHead.slice(he + 4);
@@ -440,7 +446,8 @@ function downloadUpdate(version, url, total, depth = 0) {
         if (got - lastLog > 20 * 1048576) { lastLog = got; mlog('[UPDATE] 下载进度:', Math.round(got / 1048576) + 'MB /', Math.round(total / 1048576) + 'MB'); }
       });
       tlsSock.on('end', () => {
-        if (!headParsed) return onDownloadError(new Error('响应异常'));
+        if (!active()) return;
+        if (!headParsed) return onDownloadError(new Error('响应异常（连接被提前关闭）'), active);
         fileOut.end(() => {
           mlog('[UPDATE] 下载完成:', outPath, Math.round(got / 1048576) + 'MB');
           updateState = { status: 'ready', version, path: outPath };
@@ -448,10 +455,10 @@ function downloadUpdate(version, url, total, depth = 0) {
           updateNotify('新版本 v' + version + ' 已就绪', '点击此通知立即重启升级，或稍后在托盘菜单操作', () => installUpdate());
         });
       });
-      tlsSock.on('error', onDownloadError);
+      tlsSock.on('error', (e) => onDownloadError(e, active));
     }
   });
-  socket.on('error', onDownloadError);
+  socket.on('error', (e) => onDownloadError(e, active));
 }
 
 // 校验签名 → 解包替换 → 重启（后台脚本完成，避免自删自己）
