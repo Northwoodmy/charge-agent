@@ -42,10 +42,18 @@ def bg_transparent(img, tol=28):
     return out.crop(bbox) if bbox else out
 
 def ink_centroid(img):
-    import numpy as np
-    a = np.asarray(img.split()[3], dtype=float)
-    ys = np.arange(img.size[1])
-    return float((a * ys[:, None]).sum() / a.sum())
+    # 纯 Python 实现（避免 numpy 依赖）：alpha 加权质心的 y 坐标
+    a = img.split()[3]
+    w, h = img.size
+    px = a.load()
+    total = 0
+    weighted = 0
+    for y in range(h):
+        for x in range(w):
+            v = px[x, y]
+            total += v
+            weighted += v * y
+    return weighted / total if total else h / 2
 
 def main():
     wm = bg_transparent(Image.open(SRC).convert('RGBA'))      # 216x60 黑字字标
