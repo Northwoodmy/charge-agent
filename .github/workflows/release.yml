@@ -39,14 +39,16 @@ jobs:
           CERT_P12: ${{ secrets.CERT_P12 }}
           CERT_PWD: ${{ secrets.CERT_PWD }}
 
-      - name: 清理同标签旧 Release（防 electron-builder 重复建草稿）
-        run: gh release delete "${{ github.ref_name }}" --yes || true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 构建前端 + 打包签名 + 发布到 Release
-        run: npm run build && npx electron-builder --mac --publish always
+      - name: 构建前端 + 打包签名（只构建不发布，electron-builder 的 GitHub 发布器会留草稿）
+        run: npm run build && npx electron-builder --mac --publish never
         env:
           CSC_LINK: /tmp/cert.p12
           CSC_KEY_PASSWORD: ${{ secrets.CERT_PWD }}
+
+      - name: 发布 Release（删除旧草稿 → 重建并上传安装包与更新清单）
+        run: |
+          gh release delete "${{ github.ref_name }}" --yes 2>/dev/null || true
+          sleep 2
+          gh release create "${{ github.ref_name }}"             release/*.zip release/latest-mac.yml             --title "ChargeAgent ${{ github.ref_name }}"             --generate-notes
+        env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
