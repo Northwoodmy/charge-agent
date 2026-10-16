@@ -1,0 +1,52 @@
+name: Release
+
+# 打 v* 标签即自动构建签名并发布 Release
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 生成托盘资产（3204 张功率图）
+        run: |
+          python3 -m pip install --quiet pillow
+          python3 scripts/gen-tray-assets.py
+
+      - name: 导入签名证书
+        run: |
+          echo "$CERT_P12" | base64 -d > /tmp/cert.p12
+          security create-keychain -p ci ci.keychain-db
+          security unlock-keychain -p ci ci.keychain-db
+          security import /tmp/cert.p12 -k ci.keychain-db -P "$CERT_PWD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci ci.keychain-db
+          security list-keychains -d user -s ci.keychain-db login.keychain-db
+        env:
+          CERT_P12: ${{ secrets.CERT_P12 }}
+          CERT_PWD: ${{ secrets.CERT_PWD }}
+
+      - name: 构建前端 + 打包签名
+        run: npm run build && node -e "require('electron-builder').build({mac:['dir']}).catch(e=>{console.error(e.message);process.exit(1)})"
+        env:
+          CSC_LINK: /tmp/cert.p12
+          CSC_KEY_PASSWORD: ${{ secrets.CERT_PWD }}
+
+      - name: 压缩安装包
+        run: ditto -c -k --keepParent "release/mac-arm64/ChargeAgent.app" "ChargeAgent-${{ github.ref_name }}-mac-arm64.zip"
+
+      - name: 发布 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ChargeAgent-*.zip
+          generate_release_notes: true
