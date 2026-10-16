@@ -419,6 +419,38 @@ function downloadUpdate(version, url, total, depth = 0) {
       tlsSock = tls.connect({ socket, servername: u.hostname }, () => {
         tlsSock.write(`GET ${u.pathname}${u.search} HTTP/1.1\r\nHost: ${u.hostname}\r\nUser-Agent: ChargeAgent\r\nAccept: application/octet-stream\r\nConnection: close\r\n\r\n`);
       });
+      // 分块解码状态：CDN 返回 Transfer-Encoding: chunked，必须剥掉分块框架
+      let chunked = false, chunkSize = -1, chunkBuf = Buffer.alloc(0), streamDone = false;
+      const writeBody = (buf) => { got += buf.length; fileOut.write(buf); };
+      const finishStream = () => {
+        if (streamDone || !active()) return;
+        streamDone = true;
+        fileOut.end(() => {
+          checkingUpdate = false;
+          mlog('[UPDATE] 下载完成:', outPath, Math.round(got / 1048576) + 'MB');
+          updateState = { status: 'ready', version, path: outPath };
+          rebuildTrayMenu();
+          updateNotify('新版本 v' + version + ' 已就绪', '点击此通知立即重启升级，或稍后在托盘菜单操作', () => installUpdate());
+        });
+      };
+      const feedChunked = (buf) => {
+        chunkBuf = Buffer.concat([chunkBuf, buf]);
+        for (;;) {
+          if (chunkSize < 0) {
+            const li = chunkBuf.indexOf('\r\n');
+            if (li < 0) return;
+            const sizeLine = chunkBuf.slice(0, li).toString('latin1').split(';')[0].trim();
+            chunkSize = parseInt(sizeLine, 16);
+            chunkBuf = chunkBuf.slice(li + 2);
+            if (chunkSize === 0) { finishStream(); return; }
+          } else {
+            if (chunkBuf.length < chunkSize + 2) return;
+            writeBody(chunkBuf.slice(0, chunkSize));
+            chunkBuf = chunkBuf.slice(chunkSize + 2); // 数据 + 尾部 CRLF
+            chunkSize = -1;
+          }
+        }
+      };
       tlsSock.on('data', (td) => {
         if (!headParsed) {
           resHead = Buffer.concat([resHead, td]);
@@ -429,31 +461,27 @@ function downloadUpdate(version, url, total, depth = 0) {
           if ([301, 302, 303, 307, 308].includes(status)) {
             const loc = /location:\s*(\S+)/i.exec(text)?.[1];
             if (!loc) return onDownloadError(new Error('重定向缺 Location'), active);
-            // 作废本尝试：静默旧套接字，防止其 end/error 事件误伤新尝试
             downloadAttempt++;
             try { tlsSock.removeAllListeners(); socket.removeAllListeners(); socket.destroy(); } catch {}
             return downloadUpdate(version, new UrlURL(loc, url).toString(), total, depth + 1);
           }
           if (status !== 200) return onDownloadError(new Error('下载 HTTP ' + status), active);
           headParsed = true;
+          chunked = /chunked/i.test(text);
           fileOut = fs.createWriteStream(outPath);
           const rest = resHead.slice(he + 4);
-          if (rest.length) { got += rest.length; fileOut.write(rest); }
+          if (rest.length) chunked ? feedChunked(rest) : writeBody(rest);
+          if (!chunked) got = rest.length;
           return;
         }
-        got += td.length;
-        fileOut.write(td);
-        if (got - lastLog > 20 * 1048576) { lastLog = got; mlog('[UPDATE] 下载进度:', Math.round(got / 1048576) + 'MB /', Math.round(total / 1048576) + 'MB'); }
+        if (chunked) feedChunked(td);
+        else { writeBody(td); if (got - lastLog > 20 * 1048576) { lastLog = got; mlog('[UPDATE] 下载进度:', Math.round(got / 1048576) + 'MB'); } }
       });
       tlsSock.on('end', () => {
         if (!active()) return;
         if (!headParsed) return onDownloadError(new Error('响应异常（连接被提前关闭）'), active);
-        fileOut.end(() => {
-          mlog('[UPDATE] 下载完成:', outPath, Math.round(got / 1048576) + 'MB');
-          updateState = { status: 'ready', version, path: outPath };
-          rebuildTrayMenu();
-          updateNotify('新版本 v' + version + ' 已就绪', '点击此通知立即重启升级，或稍后在托盘菜单操作', () => installUpdate());
-        });
+        if (chunked && !streamDone) return onDownloadError(new Error('下载不完整（分块流提前结束）'), active);
+        finishStream();
       });
       tlsSock.on('error', (e) => onDownloadError(e, active));
     }
