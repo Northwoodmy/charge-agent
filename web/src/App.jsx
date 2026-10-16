@@ -207,7 +207,11 @@ function PortCard({ port, onToggle }) {
       <div className="port-head">
         <span className="port-name">{port.name}<span className="type">· USB-{port.type}</span></span>
         <span className="port-head-right">
-          <button className="port-detail-btn" onClick={() => setShowDetail(true)}>详情</button>
+          {port.attached ? (
+            <button className="port-info-btn" title="查看 PD 协商与线材详情" onClick={() => setShowDetail(true)}>i</button>
+          ) : (
+            <span className="port-info-btn off" title="插入设备后可查看详情">i</span>
+          )}
           <span className={`badge ${port.attached ? 'on' : ''} ${closed ? 'closed' : ''}`}>
             {closed ? '已关闭' : port.attached ? '充电中' : '空闲'}
           </span>
