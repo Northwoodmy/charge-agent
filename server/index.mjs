@@ -50,18 +50,19 @@ app.get('/api/stats', (req, res) => {
   // 按口分组、按时间排序，用相邻采样时间差积分：Σ P × Δt（Δt 封顶 30s，防空档高估）
   // 采样密度不固定（历史窗口重叠/早期高频写入），固定 10s 假设会失真
   let wh = 0;
+  let sampleCount = 0;
   const activePorts = new Set();
   for (let port = 0; port <= 4; port++) {
     const rows = store.getHistory(port, 24 * 60).filter((r) => r.ts >= startOfDay.getTime());
     let prev = null;
     for (const r of rows) {
       const dt = prev == null ? 10_000 : Math.min(r.ts - prev, 30_000);
-      if (dt > 0) wh += r.power_w * (dt / 1000);
+      if (dt > 0) { wh += r.power_w * (dt / 1000); sampleCount++; }
       prev = r.ts;
       if (r.power_w > 0.5) activePorts.add(port);
     }
   }
-  res.json({ ok: true, todayWh: Math.round((wh / 3600) * 10) / 10, activePortsToday: activePorts.size });
+  res.json({ ok: true, todayWh: Math.round((wh / 3600) * 10) / 10, activePortsToday: activePorts.size, debug: { samples: sampleCount, rawWs: Math.round(wh) } });
 });
 
 app.get('/api/events', (req, res) => {

@@ -20,20 +20,31 @@ if (fs.existsSync(samplesPath)) {
     samples = fs.readFileSync(samplesPath, 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   } catch { samples = []; }
 }
-// 存量清洗：历史接口的滑动窗口曾导致同一采样重复入库，按 (port,ts) 去重
+// 存量清洗：历史滑动窗口重叠导致同一物理采样以不同 ts 重复入库。
+// 按口排序后贪心重采样：与已保留样本间隔 <9s 的视为重叠副本丢弃（真实采样周期 10s）。
 {
-  const seen = new Set();
-  const deduped = samples.filter((r) => {
-    const k = r.port + '-' + r.ts;
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
-  if (deduped.length !== samples.length) {
-    const removed = samples.length - deduped.length;
-    samples = deduped;
+  const byPort = new Map();
+  for (const r of samples) {
+    if (!byPort.has(r.port)) byPort.set(r.port, []);
+    byPort.get(r.port).push(r);
+  }
+  let kept = 0, before = samples.length;
+  const resampled = [];
+  for (const [port, arr] of byPort) {
+    arr.sort((a, b) => a.ts - b.ts);
+    let last = -1e15;
+    for (const r of arr) {
+      if (r.ts - last < 9000) continue; // 重叠窗口副本
+      last = r.ts;
+      resampled.push(r);
+    }
+  }
+  resampled.sort((a, b) => a.ts - b.ts);
+  kept = resampled.length;
+  if (kept !== before) {
+    samples = resampled;
     try { fs.writeFileSync(samplesPath, samples.map((r) => JSON.stringify(r)).join('\n') + (samples.length ? '\n' : '')); } catch {}
-    console.log(`[db] 历史采样去重：移除 ${removed} 条重复`);
+    console.log(`[db] 历史采样重采样：${before} → ${kept} 条（移除窗口重叠副本）`);
   }
 }
 let samplesDirtyCount = 0;
@@ -61,17 +72,11 @@ function saveKV() {
 }
 
 export const store = {
-  // 批量写入采样（追加 JSONL）
+  // 批量写入采样：立即追加 JSONL，内存与磁盘严格同步（无缓冲、无重写竞争）
   addSamples(rows) {
     if (!rows.length) return;
     samples.push(...rows);
-    samplesDirtyCount += rows.length;
-    if (samplesDirtyCount >= 200) {
-      // 攒一批再落盘，降低 IO
-      const chunk = samples.slice(-samplesDirtyCount);
-      try { fs.appendFileSync(samplesPath, chunk.map((r) => JSON.stringify(r)).join('\n') + '\n'); } catch {}
-      samplesDirtyCount = 0;
-    }
+    try { fs.appendFileSync(samplesPath, rows.map((r) => JSON.stringify(r)).join('\n') + '\n'); } catch {}
   },
 
   // 查询历史：某端口近 N 分钟（升序）
@@ -134,14 +139,9 @@ export const store = {
     saveKV();
   },
 
-  // 进程退出前落盘
+  // 进程退出前落盘（采样已实时追加，这里只管会话与 KV）
   flush() {
     try {
-      if (samplesDirtyCount > 0) {
-        const chunk = samples.slice(-samplesDirtyCount);
-        fs.appendFileSync(samplesPath, chunk.map((r) => JSON.stringify(r)).join('\n') + '\n');
-        samplesDirtyCount = 0;
-      }
       fs.writeFileSync(chatPath, JSON.stringify(chat));
       fs.writeFileSync(kvPath, JSON.stringify(kv));
     } catch {}
