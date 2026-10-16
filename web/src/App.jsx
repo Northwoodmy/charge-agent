@@ -191,13 +191,18 @@ function Overview({ status }) {
   );
 }
 
-// PD 电池信息格式化：能算百分比算百分比，只有容量就显示 Wh；读不到返回 null
+// PD 电池信息格式化：65535(0xFFFF) 是协议"未知"哨兵，决不当真值显示
 function fmtBatt(pd) {
-  if (!pd?.battery_present || !(pd.battery_present_capacity > 0)) return null;
-  if (pd.battery_design_capacity > 0) {
-    return `电量 ${Math.round((pd.battery_present_capacity / pd.battery_design_capacity) * 100)}%`;
+  if (!pd?.battery_present || pd.battery_invalid) return null;
+  const UNKNOWN = 65535;
+  const present = pd.battery_present_capacity;
+  const design = pd.battery_design_capacity;
+  if (design > 0 && design !== UNKNOWN) {
+    if (present === UNKNOWN || !(present > 0)) return null; // 有设计容量但当前电量未知
+    return `电量 ${Math.min(100, Math.round((present / design) * 100))}%`;
   }
-  return `电池 ${(pd.battery_present_capacity / 10).toFixed(1)}Wh`;
+  if (present > 0 && present !== UNKNOWN) return `电池 ${(present / 10).toFixed(1)}Wh`;
+  return null; // 只报"有电池"不报数值（如 Redmi K80 系列）
 }
 
 function PortCard({ port, onToggle, pdInfo }) {
