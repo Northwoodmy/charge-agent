@@ -247,7 +247,7 @@ function PortCard({ port, onToggle, pdInfo }) {
             {fmtBatt(pdInfo) && <span className="port-batt">{fmtBatt(pdInfo)}</span>}
             <span>{port.protocol}</span>
             <span>已充 {fmtDur(port.durationS)}</span>
-            <span>≈{port.sessionWh}Wh</span>
+            <span>≈{(pdInfo?.session_charge_mwh > 0 ? pdInfo.session_charge_mwh / 1000 : port.sessionWh).toFixed(1)}Wh</span>
           </>
         ) : (
           <span>{closed ? '端口已关闭 · 不输出电力' : '已就绪 · 插入设备即充'}</span>
