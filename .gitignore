@@ -7,3 +7,4 @@ data/
 assets/tray/
 assets/brand/wordmark-*.png
 .DS_Store
+*.zip
