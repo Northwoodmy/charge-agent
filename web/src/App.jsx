@@ -847,17 +847,22 @@ function PopoverApp() {
           <div key={p.idx} className={`pp-port ${p.attached ? 'on' : ''} ${p.active ? '' : 'closed'}`}>
             <span className="pp-port-dot" style={{ background: PORT_COLORS[p.idx] }} />
             <div className="pp-port-mid">
-              <div className="pp-port-line1"><b>{p.name}</b></div>
-              <div className="pp-port-line2">{p.attached ? (() => {
-                const pd = pdMap[p.no];
-                const parts = [`${p.voltageV.toFixed(1)}V · ${p.currentA.toFixed(2)}A`];
-                if (pd?.device_name_zh) parts.push(pd.device_name_zh);
-                else parts.push(p.protocol);
-                if (pd?.battery_present && pd.battery_design_capacity > 0) {
-                  parts.push(`电量${Math.round((pd.battery_present_capacity / pd.battery_design_capacity) * 100)}%`);
-                }
-                return parts.join(' · ');
-              })() : p.active ? '空闲' : '已关闭'}</div>
+              <div className="pp-port-line1">
+                <b>{p.name}</b>
+                {(() => {
+                  const pd = pdMap[p.no];
+                  if (!pd) return null;
+                  return (
+                    <>
+                      {pd.device_name_zh && <span className="pp-port-dev">{pd.device_name_zh}</span>}
+                      {pd.battery_present && pd.battery_design_capacity > 0 && (
+                        <span className="pp-port-batt">电量 {Math.round((pd.battery_present_capacity / pd.battery_design_capacity) * 100)}%</span>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+              <div className="pp-port-line2">{p.attached ? `${p.voltageV.toFixed(1)}V · ${p.currentA.toFixed(2)}A · ${p.protocol}` : p.active ? '空闲' : '已关闭'}</div>
             </div>
             <div className="pp-port-right">
               <div className="pp-port-w">{p.powerW}<small> W</small></div>
