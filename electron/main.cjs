@@ -349,12 +349,12 @@ function updateNotify(title, body, onClick) {
   n.show();
 }
 
-// 手动检查：走 releases.atom（不受 API 速率限制），取最高版本号
-async function manualCheckUpdate() {
+// 检查更新：silent=true 时为自动检查（启动/定时），已最新不弹通知
+async function manualCheckUpdate(silent = false) {
   if (checkingUpdate || updateState) return;
   checkingUpdate = true;
   rebuildTrayMenu();
-  mlog('[UPDATE] 手动检查开始, 当前 v' + app.getVersion(), '代理:', UPDATE_PROXY);
+  mlog(`[UPDATE] ${silent ? '自动' : '手动'}检查开始, 当前 v` + app.getVersion(), '代理:', UPDATE_PROXY);
   try {
     // 用 /releases/latest 的 302 Location 拿「最新标记」的版本：比 atom 实时、比 API 抗限流
     const lr = await httpsTunnelRequest('github.com', '/Northwoodmy/charge-agent/releases/latest');
@@ -368,7 +368,8 @@ async function manualCheckUpdate() {
     if (!semverGt(remote, app.getVersion())) {
       checkingUpdate = false;
       rebuildTrayMenu();
-      updateNotify('已是最新版本', `当前 v${app.getVersion()}，无需更新`);
+      mlog('[UPDATE] 已是最新');
+      if (!silent) updateNotify('已是最新版本', `当前 v${app.getVersion()}，无需更新`);
       return;
     }
     const assetUrl = `https://github.com/Northwoodmy/charge-agent/releases/download/v${remote}/ChargeAgent-${remote}-arm64-mac.zip`;
@@ -503,6 +504,22 @@ function downloadUpdate(version, url, total, depth = 0, offset = 0) {
 }
 
 // 安装前先校验安装包完整性；通过后后台脚本解包替换重启（避免自删自己）
+// 启动时扫描已下载的更新包（用户上次下载但没点安装），校验有效则恢复就绪状态
+function restoreReadyUpdate() {
+  try {
+    const dir = path.join(os.homedir(), 'Library/Application Support/charge-agent');
+    const zip = fs.readdirSync(dir).find((f) => /^update-([0-9.]+)\.zip$/.test(f));
+    if (!zip) return;
+    const full = path.join(dir, zip);
+    const version = zip.match(/^update-([0-9.]+)\.zip$/)[1];
+    if (!semverGt(version, app.getVersion())) { fs.unlinkSync(full); return; } // 旧包作废
+    const chk = spawnSync('unzip', ['-t', full], { encoding: 'utf-8' });
+    if (chk.status !== 0 || !/No errors/i.test(chk.stdout || '')) { fs.unlinkSync(full); return; }
+    updateState = { status: 'ready', version, path: full };
+    mlog('[UPDATE] 恢复待安装更新: v' + version);
+  } catch {}
+}
+
 function installUpdate() {
   if (updateState?.status !== 'ready' || !updateState.path) return;
   const zip = updateState.path;
@@ -578,6 +595,12 @@ app.whenReady().then(() => {
   // 右键菜单（macOS 上 setContextMenu 会让左键也弹菜单，所以改用手动 popUp）
   tray.on('click', toggleWindow);                      // 左键：直接弹/收看板
   tray.on('right-click', () => tray.popUpContextMenu(buildTrayMenu())); // 右键：菜单（按需构建，标签永远新鲜）
+
+  // 在线升级：恢复已下载未安装的更新包（重启后菜单仍显示「重启安装更新」）
+  restoreReadyUpdate();
+  // 启动检查一次，之后每 4 小时自动检查；有新版自动下载，安装永远需用户手动确认
+  setTimeout(() => manualCheckUpdate(true), 15_000);
+  setInterval(() => manualCheckUpdate(true), 4 * 3600 * 1000);
 
 
   setInterval(pollStatus, 500);
