@@ -21,8 +21,9 @@ jobs:
 
       - name: 生成托盘资产（3204 张功率图）
         run: |
-          python3 -m pip install --quiet pillow
-          python3 scripts/gen-tray-assets.py
+          python3 -m venv /tmp/venv
+          /tmp/venv/bin/pip install --quiet pillow
+          /tmp/venv/bin/python scripts/gen-tray-assets.py
 
       - name: 导入签名证书
         run: |
