@@ -353,11 +353,15 @@ async function manualCheckUpdate() {
   rebuildTrayMenu();
   mlog('[UPDATE] 手动检查开始, 当前 v' + app.getVersion(), '代理:', UPDATE_PROXY);
   try {
-    const atom = await githubGet('https://github.com/Northwoodmy/charge-agent/releases.atom');
-    const versions = [...atom.matchAll(/<title>v([0-9]+\.[0-9]+\.[0-9]+)<\/title>/g)].map((m) => m[1]);
-    if (!versions.length) throw new Error('解析 releases.atom 失败');
-    const remote = versions.reduce((a, b) => (semverGt(b, a) ? b : a));
-    mlog('[UPDATE] 远端版本列表:', versions.join(', '), '→ 最新 v' + remote);
+    // 用 /releases/latest 的 302 Location 拿「最新标记」的版本：比 atom 实时、比 API 抗限流
+    const lr = await httpsTunnelRequest('github.com', '/Northwoodmy/charge-agent/releases/latest');
+    if (![301, 302, 303, 307, 308].includes(lr.status) || !lr.headers.location) {
+      throw new Error('查询最新版本 HTTP ' + lr.status);
+    }
+    const m = lr.headers.location.match(/tag\/v?([0-9]+\.[0-9]+\.[0-9]+)/);
+    if (!m) throw new Error('无法从 Location 解析版本: ' + lr.headers.location);
+    const remote = m[1];
+    mlog('[UPDATE] 远端最新: v' + remote);
     if (!semverGt(remote, app.getVersion())) {
       checkingUpdate = false;
       rebuildTrayMenu();
