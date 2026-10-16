@@ -235,6 +235,7 @@ let autoUpdater = null;
 try { ({ autoUpdater } = require('electron-updater')); } catch { autoUpdater = null; }
 let updateState = null;   // {status: 'downloading'|'ready', version}
 let checkingUpdate = false;
+let checkTimer = null;
 
 function buildTrayMenu() {
   const items = [];
@@ -275,7 +276,9 @@ function updateNotify(title, body, onClick) {
 }
 
 function setupUpdater() {
-  if (isDev || !autoUpdater) return;
+  if (isDev) return;
+  mlog('[UPDATE] updater 模块状态:', autoUpdater ? '已加载' : '未加载(require失败)');
+  if (!autoUpdater) return;
   autoUpdater.autoDownload = true; // 仅手动检查后触发下载
   autoUpdater.on('update-available', (info) => {
     clearTimeout(checkTimer);
@@ -310,11 +313,25 @@ function manualCheckUpdate() {
   if (!autoUpdater || checkingUpdate || updateState) return;
   checkingUpdate = true;
   rebuildTrayMenu();
-  autoUpdater.checkForUpdates().catch((e) => {
+  mlog('[UPDATE] 手动检查开始, 当前版本 v' + app.getVersion());
+  // 25 秒无响应视为超时：网络对 GitHub 静默丢包时不会触发 error
+  clearTimeout(checkTimer);
+  checkTimer = setTimeout(() => {
+    if (checkingUpdate && !updateState) {
+      mlog('[UPDATE] 检查超时（25s 无响应）');
+      checkingUpdate = false;
+      rebuildTrayMenu();
+      updateNotify('检查更新超时', '无法连接 GitHub（25 秒无响应），可稍后再试');
+    }
+  }, 25_000);
+  autoUpdater.checkForUpdates().then((result) => {
+    mlog('[UPDATE] checkForUpdates resolved:', result ? JSON.stringify({ version: result.updateInfo?.version, files: (result.updateInfo?.files || []).length }) : 'null');
+  }).catch((e) => {
+    clearTimeout(checkTimer);
     mlog('[UPDATE] 检查失败:', String(e.message || e).slice(0, 300));
     checkingUpdate = false;
     rebuildTrayMenu();
-    updateNotify('检查更新失败', '请检查网络后重试');
+    updateNotify('检查更新失败', String(e.message || '请检查网络后重试').slice(0, 120));
   });
 }
 
