@@ -15,6 +15,9 @@ mlog('[MAIN] entry loaded');
 // 开发模式：加载 Vite dev server；生产模式：加载应用内后端托管的静态文件
 const { app, BrowserWindow, Tray, Menu, nativeImage, Notification, shell, ipcMain, nativeTheme } = require('electron');
 const { spawn } = require('node:child_process');
+const net = require('node:net');
+const tls = require('node:tls');
+const { URL: UrlURL } = require('node:url');
 
 const BACKEND_PORT = process.env.BACKEND_PORT || 8932;
 // 手动打包的 bundle 不被 Electron 识别为 isPackaged，改用 app.asar 是否存在来判断环境
@@ -229,18 +232,86 @@ function startBackend() {
   }
 }
 
-// ── 在线升级（GitHub Releases，electron-updater）──
-// 手动触发：不自动检查，用户从托盘菜单点「检查更新」
-let autoUpdater = null;
-try { ({ autoUpdater } = require('electron-updater')); } catch { autoUpdater = null; }
+// ── 在线升级（GitHub Releases，自实现：代理感知 + 本地替换安装）──
+// electron-updater 在本环境静默失效（resolve null），且应用进程被按应用 VPN 拦截
+// 直接访问 GitHub；改为：经本地代理(127.0.0.1:1082) CONNECT 隧道访问官方 API 与下载源
 let updateState = null;   // {status: 'downloading'|'ready', version}
 let checkingUpdate = false;
-let checkTimer = null;
+const UPDATE_PROXY = process.env.CHARGEAGENT_UPDATE_PROXY || 'http://127.0.0.1:1082';
+
+function semverGt(a, b) {
+  const pa = String(a).replace(/^v/, '').split('.').map((x) => parseInt(x, 10) || 0);
+  const pb = String(b).replace(/^v/, '').split('.').map((x) => parseInt(x, 10) || 0);
+  for (let i = 0; i < 3; i++) { if (pa[i] !== pb[i]) return pa[i] > pb[i]; }
+  return false;
+}
+
+// 代理 CONNECT 隧道 + TLS 的一次 HTTPS 请求（返回 {status, headers, body(Buffer)}）
+function httpsTunnelRequest(host, reqPath, { method = 'GET', timeout = 15000, headers = {} } = {}) {
+  return new Promise((resolve, reject) => {
+    const px = new URL(UPDATE_PROXY);
+    const socket = net.connect(Number(px.port || 1082), px.hostname, () => {
+      socket.write(`CONNECT ${host}:443 HTTP/1.1\r\nHost: ${host}:443\r\n\r\n`);
+    });
+    socket.setTimeout(timeout, () => { socket.destroy(); reject(new Error('代理连接超时')); });
+    let handshake = Buffer.alloc(0);
+    let tlsSock = null;
+    const chunks = [];
+    let done = false;
+    const fail = (e) => { if (!done) { done = true; reject(e); } };
+
+    socket.on('data', (d) => {
+      if (!tlsSock) {
+        handshake = Buffer.concat([handshake, d]);
+        const idx = handshake.indexOf('\r\n\r\n');
+        if (idx < 0) return;
+        const head = handshake.slice(0, idx).toString('latin1');
+        if (!/HTTP\/1\.[01] 200/.test(head)) return fail(new Error('代理 CONNECT 被拒: ' + head.split('\r\n')[0]));
+        const rest = handshake.slice(idx + 4);
+        tlsSock = tls.connect({ socket, servername: host }, () => {
+          const hdrs = Object.entries({ Host: host, 'User-Agent': 'ChargeAgent', Connection: 'close', ...headers })
+            .map(([k, v]) => `${k}: ${v}`).join('\r\n');
+          tlsSock.write(`${method} ${reqPath} HTTP/1.1\r\n${hdrs}\r\n\r\n`);
+        });
+        tlsSock.on('data', (td) => chunks.push(td));
+        tlsSock.on('end', () => {
+          if (done) return;
+          done = true;
+          const raw = Buffer.concat(chunks);
+          const hEnd = raw.indexOf('\r\n\r\n');
+          const headText = raw.slice(0, hEnd).toString('latin1');
+          const status = Number((headText.match(/HTTP\/1\.[01] (\d+)/) || [])[1] || 0);
+          const headers = {};
+          headText.split('\r\n').slice(1).forEach((line) => {
+            const c = line.indexOf(':');
+            if (c > 0) headers[line.slice(0, c).trim().toLowerCase()] = line.slice(c + 1).trim();
+          });
+          resolve({ status, headers, body: raw.slice(hEnd + 4) });
+        });
+        tlsSock.on('error', fail);
+        if (rest.length) socket.unshift ? null : null;
+      }
+    });
+    socket.on('error', fail);
+  });
+}
+
+// 跟随重定向的 GitHub API GET（body 限 32MB）
+async function githubGet(url, depth = 0) {
+  if (depth > 5) throw new Error('重定向过多');
+  const u = new UrlURL(url);
+  const r = await httpsTunnelRequest(u.hostname, u.pathname + u.search);
+  if ([301, 302, 303, 307, 308].includes(r.status) && r.headers.location) {
+    return githubGet(new UrlURL(r.headers.location, url).toString(), depth + 1);
+  }
+  if (r.status !== 200) throw new Error(`GitHub HTTP ${r.status}`);
+  return r.body.toString('utf-8');
+}
 
 function buildTrayMenu() {
   const items = [];
   if (updateState?.status === 'ready') {
-    items.push({ label: `重启安装更新 v${updateState.version}`, click: () => { app.isQuitting = true; autoUpdater.quitAndInstall(); } });
+    items.push({ label: `重启安装更新 v${updateState.version}`, click: () => installUpdate() });
   } else if (updateState?.status === 'downloading') {
     items.push({ label: `新版本 v${updateState.version} 下载中…`, enabled: false });
   } else if (checkingUpdate) {
@@ -275,64 +346,110 @@ function updateNotify(title, body, onClick) {
   n.show();
 }
 
-function setupUpdater() {
-  if (isDev) return;
-  mlog('[UPDATE] updater 模块状态:', autoUpdater ? '已加载' : '未加载(require失败)');
-  if (!autoUpdater) return;
-  autoUpdater.autoDownload = true; // 仅手动检查后触发下载
-  autoUpdater.on('update-available', (info) => {
-    clearTimeout(checkTimer);
-    updateState = { status: 'downloading', version: info.version };
-    mlog('[UPDATE] 发现新版本:', info.version);
-    rebuildTrayMenu();
-    updateNotify('发现新版本 v' + info.version, '正在后台下载，完成后会提醒你');
-  });
-  autoUpdater.on('update-not-available', () => {
-    clearTimeout(checkTimer);
-    mlog('[UPDATE] 已是最新');
-    updateNotify('已是最新版本', `当前 v${app.getVersion()}，无需更新`);
-    checkingUpdate = false;
-    rebuildTrayMenu();
-  });
-  autoUpdater.on('update-downloaded', (info) => {
-    updateState = { status: 'ready', version: info.version };
-    mlog('[UPDATE] 下载完成:', info.version);
-    rebuildTrayMenu();
-    updateNotify('新版本 v' + info.version + ' 已就绪', '点击此通知立即重启升级，或稍后在托盘菜单操作',
-      () => { app.isQuitting = true; autoUpdater.quitAndInstall(); });
-  });
-  autoUpdater.on('error', (e) => {
-    mlog('[UPDATE] 错误:', String(e.message || e).slice(0, 300));
-    checkingUpdate = false;
-    updateState = null;
-    rebuildTrayMenu();
-  });
-}
-
-function manualCheckUpdate() {
-  if (!autoUpdater || checkingUpdate || updateState) return;
+// 手动检查：拉取最新 Release，比较版本
+async function manualCheckUpdate() {
+  if (checkingUpdate || updateState) return;
   checkingUpdate = true;
   rebuildTrayMenu();
-  mlog('[UPDATE] 手动检查开始, 当前版本 v' + app.getVersion());
-  // 25 秒无响应视为超时：网络对 GitHub 静默丢包时不会触发 error
-  clearTimeout(checkTimer);
-  checkTimer = setTimeout(() => {
-    if (checkingUpdate && !updateState) {
-      mlog('[UPDATE] 检查超时（25s 无响应）');
+  mlog('[UPDATE] 手动检查开始, 当前 v' + app.getVersion(), '代理:', UPDATE_PROXY);
+  try {
+    const body = await githubGet('https://api.github.com/repos/Northwoodmy/charge-agent/releases/latest');
+    const rel = JSON.parse(body);
+    const remote = String(rel.tag_name || '').replace(/^v/, '');
+    mlog('[UPDATE] 远端最新:', rel.tag_name);
+    if (!remote) throw new Error('解析版本失败');
+    if (!semverGt(remote, app.getVersion())) {
       checkingUpdate = false;
       rebuildTrayMenu();
-      updateNotify('检查更新超时', '无法连接 GitHub（25 秒无响应），可稍后再试');
+      updateNotify('已是最新版本', `当前 v${app.getVersion()}，无需更新`);
+      return;
     }
-  }, 25_000);
-  autoUpdater.checkForUpdates().then((result) => {
-    mlog('[UPDATE] checkForUpdates resolved:', result ? JSON.stringify({ version: result.updateInfo?.version, files: (result.updateInfo?.files || []).length }) : 'null');
-  }).catch((e) => {
-    clearTimeout(checkTimer);
+    const asset = (rel.assets || []).find((a) => a.name.endsWith('.zip'));
+    if (!asset) throw new Error('Release 里没有安装包');
+    updateState = { status: 'downloading', version: remote, url: asset.browser_download_url, size: asset.size };
+    rebuildTrayMenu();
+    updateNotify('发现新版本 v' + remote, '正在后台下载，完成后会提醒你');
+    downloadUpdate(remote, asset.browser_download_url, asset.size);
+  } catch (e) {
     mlog('[UPDATE] 检查失败:', String(e.message || e).slice(0, 300));
     checkingUpdate = false;
     rebuildTrayMenu();
-    updateNotify('检查更新失败', String(e.message || '请检查网络后重试').slice(0, 120));
+    updateNotify('检查更新失败', String(e.message || '未知错误').slice(0, 140));
+  }
+}
+
+// 经代理隧道下载 zip（分块写入，带进度日志）
+function downloadUpdate(version, url, total) {
+  const outPath = path.join(os.homedir(), 'Library/Application Support/charge-agent/update-' + version + '.zip');
+  const u = new UrlURL(url);
+  mlog('[UPDATE] 开始下载:', u.hostname, Math.round(total / 1048576) + 'MB');
+  const px = new URL(UPDATE_PROXY);
+  const socket = net.connect(Number(px.port || 1082), px.hostname, () => {
+    socket.write(`CONNECT ${u.hostname}:443 HTTP/1.1\r\nHost: ${u.hostname}:443\r\n\r\n`);
   });
+  socket.setTimeout(30_000, () => { socket.destroy(); onDownloadError(new Error('下载连接超时')); });
+  let handshake = Buffer.alloc(0), tlsSock = null, fileOut = null, got = 0, lastLog = 0;
+
+  const onDownloadError = (e) => {
+    mlog('[UPDATE] 下载失败:', String(e.message || e).slice(0, 200));
+    try { fileOut?.close(); } catch {}
+    try { fs.unlinkSync(outPath); } catch {}
+    updateState = null;
+    checkingUpdate = false;
+    rebuildTrayMenu();
+    updateNotify('更新下载失败', String(e.message || '网络错误').slice(0, 120));
+  };
+
+  socket.on('data', (d) => {
+    if (!tlsSock) {
+      handshake = Buffer.concat([handshake, d]);
+      const idx = handshake.indexOf('\r\n\r\n');
+      if (idx < 0) return;
+      const head = handshake.slice(0, idx).toString('latin1');
+      if (!/HTTP\/1\.[01] 200/.test(head)) return onDownloadError(new Error('代理 CONNECT 被拒'));
+      tlsSock = tls.connect({ socket, servername: u.hostname }, () => {
+        tlsSock.write(`GET ${u.pathname}${u.search} HTTP/1.1\r\nHost: ${u.hostname}\r\nUser-Agent: ChargeAgent\r\nAccept: application/octet-stream\r\nConnection: close\r\n\r\n`);
+        fileOut = fs.createWriteStream(outPath);
+      });
+      tlsSock.on('data', (td) => {
+        got += td.length;
+        fileOut.write(td);
+        if (got - lastLog > 20 * 1048576) { lastLog = got; mlog('[UPDATE] 下载进度:', Math.round(got / 1048576) + 'MB /', Math.round(total / 1048576) + 'MB'); }
+      });
+      tlsSock.on('end', () => {
+        fileOut.end(() => {
+          mlog('[UPDATE] 下载完成:', outPath);
+          updateState = { status: 'ready', version, path: outPath };
+          rebuildTrayMenu();
+          updateNotify('新版本 v' + version + ' 已就绪', '点击此通知立即重启升级，或稍后在托盘菜单操作', () => installUpdate());
+        });
+      });
+      tlsSock.on('error', onDownloadError);
+    }
+  });
+  socket.on('error', onDownloadError);
+}
+
+// 校验签名 → 解包替换 → 重启（后台脚本完成，避免自删自己）
+function installUpdate() {
+  if (updateState?.status !== 'ready' || !updateState.path) return;
+  const zip = updateState.path;
+  if (!fs.existsSync(zip)) { updateNotify('安装失败', '安装包不存在'); return; }
+  mlog('[UPDATE] 开始安装:', zip);
+  const script = `#!/bin/bash
+set -e
+sleep 1
+unzip -oq "${zip}" -d /tmp/chargeagent-update
+rm -rf "/Applications/ChargeAgent.app"
+mv "/tmp/chargeagent-update/ChargeAgent.app" /Applications/ChargeAgent.app
+xattr -dr com.apple.quarantine "/Applications/ChargeAgent.app" 2>/dev/null
+rm -f "${zip}"
+open /Applications/ChargeAgent.app
+`;
+  const sp = spawn('bash', ['-c', script], { detached: true, stdio: 'ignore' });
+  sp.unref();
+  app.isQuitting = true;
+  app.quit();
 }
 
 // ── 开机自启（登录项，签名应用可用）──
@@ -375,7 +492,6 @@ app.whenReady().then(() => {
   tray.on('click', toggleWindow);                      // 左键：直接弹/收看板
   tray.on('right-click', () => tray.popUpContextMenu(buildTrayMenu())); // 右键：菜单（按需构建，标签永远新鲜）
 
-  setupUpdater();
 
   setInterval(pollStatus, 500);
   setInterval(pollEvents, 5000);
