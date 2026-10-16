@@ -14,7 +14,7 @@ mlog('[MAIN] entry loaded');
 
 // 开发模式：加载 Vite dev server；生产模式：加载应用内后端托管的静态文件
 const { app, BrowserWindow, Tray, Menu, nativeImage, Notification, shell, ipcMain, nativeTheme } = require('electron');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const net = require('node:net');
 const tls = require('node:tls');
 const { URL: UrlURL } = require('node:url');
@@ -461,20 +461,33 @@ function downloadUpdate(version, url, total, depth = 0) {
   socket.on('error', (e) => onDownloadError(e, active));
 }
 
-// 校验签名 → 解包替换 → 重启（后台脚本完成，避免自删自己）
+// 安装前先校验安装包完整性；通过后后台脚本解包替换重启（避免自删自己）
 function installUpdate() {
   if (updateState?.status !== 'ready' || !updateState.path) return;
   const zip = updateState.path;
-  if (!fs.existsSync(zip)) { updateNotify('安装失败', '安装包不存在'); return; }
-  mlog('[UPDATE] 开始安装:', zip);
+  if (!fs.existsSync(zip)) { updateNotify('安装失败', '安装包不存在，请重新检查更新'); return; }
+  mlog('[UPDATE] 校验安装包:', zip);
+  const chk = spawnSync('unzip', ['-t', zip], { encoding: 'utf-8' });
+  if (chk.status !== 0 || !/No errors/i.test(chk.stdout || '')) {
+    mlog('[UPDATE] 安装包损坏:', (chk.stdout || chk.stderr || '').slice(-200));
+    try { fs.unlinkSync(zip); } catch {}
+    updateState = null;
+    rebuildTrayMenu();
+    updateNotify('安装包已损坏', '已清理，请重新「检查更新」下载');
+    return;
+  }
+  mlog('[UPDATE] 校验通过，开始安装');
   const script = `#!/bin/bash
+exec >/tmp/chargeagent-install.log 2>&1
 set -e
 sleep 1
+rm -rf /tmp/chargeagent-update
 unzip -oq "${zip}" -d /tmp/chargeagent-update
 rm -rf "/Applications/ChargeAgent.app"
 mv "/tmp/chargeagent-update/ChargeAgent.app" /Applications/ChargeAgent.app
 xattr -dr com.apple.quarantine "/Applications/ChargeAgent.app" 2>/dev/null
 rm -f "${zip}"
+sleep 1
 open /Applications/ChargeAgent.app
 `;
   const sp = spawn('bash', ['-c', script], { detached: true, stdio: 'ignore' });
