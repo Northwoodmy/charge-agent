@@ -62,7 +62,10 @@ function updateTrayDisplay(totalW, online) {
   const key = trayImagePath(totalW, online);
   if (key !== lastTrayKey) {
     lastTrayKey = key;
-    tray.setImage(nativeImage.createFromPath(key));
+    // 模板图像：系统按菜单栏明暗自适应反色（深底白字/浅底黑字，换壁纸即时切换）
+    const img = nativeImage.createFromPath(key);
+    img.setTemplateImage(true);
+    tray.setImage(img);
     tray.setTitle('');
   }
   tray.setToolTip(`小电拼 2993 · ${online && totalW != null ? `${(Math.round(totalW * 10) / 10).toFixed(1)}W` : '离线'}`);
@@ -566,7 +569,9 @@ app.whenReady().then(() => {
 
   startBackend();
 
-  tray = new Tray(nativeImage.createFromPath(trayImagePath(null, false)));
+  const initTrayImg = nativeImage.createFromPath(trayImagePath(null, false));
+  initTrayImg.setTemplateImage(true);
+  tray = new Tray(initTrayImg);
   tray.setToolTip('小电拼 2993 · 充电管家');
   // 系统主题切换时换字标配色
   nativeTheme.on('updated', () => { lastTrayKey = null; updateTrayDisplay(lastTotalW, lastOnline); });
