@@ -26,6 +26,14 @@ const BASE_URL = isDev
 const FULL_URL = BASE_URL + '/';       // 完整网页版（浏览器打开）
 const POPOVER_URL = BASE_URL + '/#popover'; // 弹窗专用紧凑布局
 
+// 单实例锁：防止登录项+手动启动等产生双开（双开会抢后端端口、托盘行为混乱）
+if (!app.requestSingleInstanceLock()) {
+  mlog('[MAIN] 已有实例在运行，退出');
+  app.quit();
+} else {
+  app.on('second-instance', () => { if (win) showWindow(); });
+}
+
 let tray = null;
 let win = null;
 let backendProc = null;
