@@ -381,15 +381,15 @@ async function manualCheckUpdate() {
   }
 }
 
-// 经代理隧道下载 zip（解析响应头、跟随重定向、分块写盘带进度）
+// 经代理隧道下载 zip（解析响应头、跟随重定向、支持断点续传——代理长连接常被掐断）
 let downloadAttempt = 0; // 每次尝试唯一 ID：重定向/过期套接字的事件一律作废
-function downloadUpdate(version, url, total, depth = 0) {
+function downloadUpdate(version, url, total, depth = 0, offset = 0) {
   const myId = ++downloadAttempt;
   const active = () => myId === downloadAttempt;
-  if (depth > 5) return onDownloadError(new Error('重定向过多'), active);
+  if (depth > 8) return onDownloadError(new Error('重定向/续传次数过多'), active);
   const outPath = path.join(os.homedir(), 'Library/Application Support/charge-agent/update-' + version + '.zip');
   const u = new UrlURL(url);
-  mlog('[UPDATE] 下载:', u.hostname, depth ? '(重定向)' : '', Math.round(total / 1048576) + 'MB');
+  mlog('[UPDATE] 下载:', u.hostname, depth ? `(第${Math.ceil(depth / 2)}次接续)` : '', '已收', Math.round(offset / 1048576) + 'MB');
   const px = new URL(UPDATE_PROXY);
   const socket = net.connect(Number(px.port || 1082), px.hostname, () => {
     socket.write(`CONNECT ${u.hostname}:443 HTTP/1.1\r\nHost: ${u.hostname}:443\r\n\r\n`);
@@ -417,7 +417,8 @@ function downloadUpdate(version, url, total, depth = 0) {
       const head = handshake.slice(0, idx).toString('latin1');
       if (!/HTTP\/1\.[01] 200/.test(head)) return onDownloadError(new Error('代理 CONNECT 被拒'));
       tlsSock = tls.connect({ socket, servername: u.hostname }, () => {
-        tlsSock.write(`GET ${u.pathname}${u.search} HTTP/1.1\r\nHost: ${u.hostname}\r\nUser-Agent: ChargeAgent\r\nAccept: application/octet-stream\r\nConnection: close\r\n\r\n`);
+        const rangeHdr = offset > 0 ? `Range: bytes=${offset}-\r\n` : '';
+        tlsSock.write(`GET ${u.pathname}${u.search} HTTP/1.1\r\nHost: ${u.hostname}\r\nUser-Agent: ChargeAgent\r\nAccept: application/octet-stream\r\n${rangeHdr}Connection: close\r\n\r\n`);
       });
       // 分块解码状态：CDN 返回 Transfer-Encoding: chunked，必须剥掉分块框架
       let chunked = false, chunkSize = -1, chunkBuf = Buffer.alloc(0), streamDone = false;
@@ -425,9 +426,17 @@ function downloadUpdate(version, url, total, depth = 0) {
       const finishStream = () => {
         if (streamDone || !active()) return;
         streamDone = true;
+        const received = offset + got;
+        // 代理掐断：按 Range 断点续传
+        if (expected > 0 && got < expected && received < total) {
+          mlog('[UPDATE] 连接中断:', Math.round(got / 1048576) + '/', Math.round(expected / 1048576) + 'MB，断点续传');
+          try { tlsSock.removeAllListeners(); socket.removeAllListeners(); socket.destroy(); } catch {}
+          downloadAttempt++; // 作废本尝试
+          return downloadUpdate(version, url, total, depth + 1, received);
+        }
         fileOut.end(() => {
           checkingUpdate = false;
-          mlog('[UPDATE] 下载完成:', outPath, Math.round(got / 1048576) + 'MB');
+          mlog('[UPDATE] 下载完成:', Math.round(received / 1048576) + 'MB');
           updateState = { status: 'ready', version, path: outPath };
           rebuildTrayMenu();
           updateNotify('新版本 v' + version + ' 已就绪', '点击此通知立即重启升级，或稍后在托盘菜单操作', () => installUpdate());
@@ -468,7 +477,8 @@ function downloadUpdate(version, url, total, depth = 0) {
           if (status !== 200) return onDownloadError(new Error('下载 HTTP ' + status), active);
           headParsed = true;
           chunked = /chunked/i.test(text);
-          fileOut = fs.createWriteStream(outPath);
+          expected = Number(/content-length:\s*(\d+)/i.exec(text)?.[1] || 0);
+          fileOut = fs.createWriteStream(outPath, offset > 0 ? { flags: 'a' } : {});
           const rest = resHead.slice(he + 4);
           if (rest.length) chunked ? feedChunked(rest) : writeBody(rest);
           if (!chunked) got = rest.length;
