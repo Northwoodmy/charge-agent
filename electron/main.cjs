@@ -221,6 +221,65 @@ function startBackend() {
   }
 }
 
+// ── 在线升级（GitHub Releases，electron-updater）──
+let autoUpdater = null;
+try { ({ autoUpdater } = require('electron-updater')); } catch { autoUpdater = null; }
+let updateState = null; // {status: 'downloading'|'ready', version}
+
+function buildTrayMenu() {
+  const items = [];
+  if (updateState) {
+    items.push(updateState.status === 'ready'
+      ? { label: `重启安装更新 v${updateState.version}`, click: () => { app.isQuitting = true; autoUpdater.quitAndInstall(); } }
+      : { label: `发现新版本 v${updateState.version}，下载中…`, enabled: false });
+    items.push({ type: 'separator' });
+  }
+  items.push(
+    { label: '桌面悬浮窗', type: 'checkbox', checked: fs.existsSync(MINI_ENABLED),
+      click: (item) => {
+        const on = toggleMiniWindow();
+        item.checked = on;
+        try { on ? fs.writeFileSync(MINI_ENABLED, '1') : fs.unlinkSync(MINI_ENABLED); } catch {}
+      } },
+    { label: '在浏览器中打开完整页面', click: () => shell.openExternal(FULL_URL) },
+    { type: 'separator' },
+    { label: '开机自启', type: 'checkbox', checked: autoStartEnabled(),
+      click: (item) => setAutoStart(item.checked) },
+    { type: 'separator' },
+    { label: '退出', click: () => { app.isQuitting = true; app.quit(); } },
+  );
+  return Menu.buildFromTemplate(items);
+}
+function rebuildTrayMenu() { if (tray) tray.setContextMenu(buildTrayMenu()); }
+
+function updateNotify(title, body, onClick) {
+  if (!Notification.isSupported()) return;
+  const n = new Notification({ title, body });
+  if (onClick) n.on('click', onClick);
+  n.show();
+}
+
+function setupUpdater() {
+  if (isDev || !autoUpdater) return;
+  autoUpdater.autoDownload = true;
+  autoUpdater.on('update-available', (info) => {
+    updateState = { status: 'downloading', version: info.version };
+    mlog('[UPDATE] 发现新版本:', info.version);
+    rebuildTrayMenu();
+    updateNotify('发现新版本 v' + info.version, '正在后台下载，完成后会提醒你');
+  });
+  autoUpdater.on('update-downloaded', (info) => {
+    updateState = { status: 'ready', version: info.version };
+    mlog('[UPDATE] 下载完成:', info.version);
+    rebuildTrayMenu();
+    updateNotify('新版本 v' + info.version + ' 已就绪', '点击此通知立即重启升级，或稍后在托盘菜单操作',
+      () => { app.isQuitting = true; autoUpdater.quitAndInstall(); });
+  });
+  autoUpdater.on('error', (e) => mlog('[UPDATE] 错误:', String(e.message || e).slice(0, 300)));
+  autoUpdater.checkForUpdates().catch((e) => mlog('[UPDATE] 检查失败:', String(e.message || e).slice(0, 300)));
+  setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 4 * 3600 * 1000);
+}
+
 // ── 开机自启（登录项，签名应用可用）──
 const AUTOSTART_MARKER = path.join(os.homedir(), 'Library/Application Support/charge-agent/.autostart-default-on');
 function autoStartEnabled() { return app.getLoginItemSettings().openAtLogin; }
@@ -258,22 +317,11 @@ app.whenReady().then(() => {
   // 系统主题切换时换字标配色
   nativeTheme.on('updated', () => { lastTrayKey = null; updateTrayDisplay(lastTotalW, lastOnline); });
   // 右键菜单（macOS 上 setContextMenu 会让左键也弹菜单，所以改用手动 popUp）
-  const contextMenu = Menu.buildFromTemplate([
-    { label: '桌面悬浮窗', type: 'checkbox', checked: fs.existsSync(MINI_ENABLED),
-      click: (item) => {
-        const on = toggleMiniWindow();
-        item.checked = on;
-        try { on ? fs.writeFileSync(MINI_ENABLED, '1') : fs.unlinkSync(MINI_ENABLED); } catch {}
-      } },
-    { label: '在浏览器中打开完整页面', click: () => shell.openExternal(FULL_URL) },
-    { type: 'separator' },
-    { label: '开机自启', type: 'checkbox', checked: autoStartEnabled(),
-      click: (item) => setAutoStart(item.checked) },
-    { type: 'separator' },
-    { label: '退出', click: () => { app.isQuitting = true; app.quit(); } },
-  ]);
+  rebuildTrayMenu();
   tray.on('click', toggleWindow);                      // 左键：直接弹/收看板
-  tray.on('right-click', () => tray.popUpContextMenu(contextMenu)); // 右键：菜单
+  tray.on('right-click', () => tray.popUpContextMenu(buildTrayMenu())); // 右键：菜单
+
+  setupUpdater();
 
   setInterval(pollStatus, 500);
   setInterval(pollEvents, 5000);

@@ -39,17 +39,9 @@ jobs:
           CERT_P12: ${{ secrets.CERT_P12 }}
           CERT_PWD: ${{ secrets.CERT_PWD }}
 
-      - name: 构建前端 + 打包签名
-        run: npm run build && node -e "require('electron-builder').build({mac:['dir']}).catch(e=>{console.error(e.message);process.exit(1)})"
+      - name: 构建前端 + 打包签名 + 发布到 Release
+        run: npm run build && npx electron-builder --mac --publish always
         env:
           CSC_LINK: /tmp/cert.p12
           CSC_KEY_PASSWORD: ${{ secrets.CERT_PWD }}
-
-      - name: 压缩安装包
-        run: ditto -c -k --keepParent "release/mac-arm64/ChargeAgent.app" "ChargeAgent-${{ github.ref_name }}-mac-arm64.zip"
-
-      - name: 发布 Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ChargeAgent-*.zip
-          generate_release_notes: true
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
