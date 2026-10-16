@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { api } from './api.js';
 import PowerChart, { PORT_COLORS } from './PowerChart.jsx';
 import { VERSION } from './version.js';
@@ -283,7 +284,8 @@ function PortDetailModal({ port, onClose }) {
     ? pts.map((v, i) => `${(i / (pts.length - 1)) * W},${H - (v / max) * (H - 6)}`).join(' ')
     : '';
 
-  return (
+  // 用 portal 挂到 body：端口卡 hover 时的 transform 会让 fixed 定位失真
+  return createPortal(
     <div className="modal-mask" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h2>{port.name} 口详情</h2>
@@ -330,7 +332,8 @@ function PortDetailModal({ port, onClose }) {
           <button className="btn" onClick={onClose}>关闭</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
