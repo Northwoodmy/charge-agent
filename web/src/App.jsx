@@ -333,6 +333,15 @@ function PortDetailModal({ port, onClose }) {
                   {fmtBatt(pd) && (
                     <tr><td>设备电池</td><td>{fmtBatt(pd)}（{{0: '充电中', 1: '放电', 2: '已充满'}[pd.battery_status] || '静置'}）</td></tr>
                   )}
+                  {(() => {
+                    const d = pd.battery_design_capacity, f = pd.battery_last_full_charge_capacity;
+                    if (!pd.battery_present || pd.battery_invalid) return null;
+                    if (!(d > 0) || d === 65535 || !(f > 0) || f === 65535) return null;
+                    const health = Math.min(100, Math.round((f / d) * 100));
+                    return (
+                      <tr><td>电池健康</td><td>{health}%（{(100 - health > 0) ? `衰减 ${100 - health}%` : '无衰减'}）</td></tr>
+                    );
+                  })()}
                 </tbody>
               </table>
             </div>
