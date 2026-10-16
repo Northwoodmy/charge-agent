@@ -378,17 +378,19 @@ async function manualCheckUpdate() {
   }
 }
 
-// 经代理隧道下载 zip（分块写入，带进度日志）
-function downloadUpdate(version, url, total) {
+// 经代理隧道下载 zip（解析响应头、跟随重定向、分块写盘带进度）
+function downloadUpdate(version, url, total, depth = 0) {
+  if (depth > 5) return onDownloadError(new Error('重定向过多'));
   const outPath = path.join(os.homedir(), 'Library/Application Support/charge-agent/update-' + version + '.zip');
   const u = new UrlURL(url);
-  mlog('[UPDATE] 开始下载:', u.hostname, Math.round(total / 1048576) + 'MB');
+  mlog('[UPDATE] 下载:', u.hostname, depth ? '(重定向)' : '', Math.round(total / 1048576) + 'MB');
   const px = new URL(UPDATE_PROXY);
   const socket = net.connect(Number(px.port || 1082), px.hostname, () => {
     socket.write(`CONNECT ${u.hostname}:443 HTTP/1.1\r\nHost: ${u.hostname}:443\r\n\r\n`);
   });
   socket.setTimeout(30_000, () => { socket.destroy(); onDownloadError(new Error('下载连接超时')); });
   let handshake = Buffer.alloc(0), tlsSock = null, fileOut = null, got = 0, lastLog = 0;
+  let resHead = Buffer.alloc(0), headParsed = false;
 
   const onDownloadError = (e) => {
     mlog('[UPDATE] 下载失败:', String(e.message || e).slice(0, 200));
@@ -409,16 +411,35 @@ function downloadUpdate(version, url, total) {
       if (!/HTTP\/1\.[01] 200/.test(head)) return onDownloadError(new Error('代理 CONNECT 被拒'));
       tlsSock = tls.connect({ socket, servername: u.hostname }, () => {
         tlsSock.write(`GET ${u.pathname}${u.search} HTTP/1.1\r\nHost: ${u.hostname}\r\nUser-Agent: ChargeAgent\r\nAccept: application/octet-stream\r\nConnection: close\r\n\r\n`);
-        fileOut = fs.createWriteStream(outPath);
       });
       tlsSock.on('data', (td) => {
+        if (!headParsed) {
+          resHead = Buffer.concat([resHead, td]);
+          const he = resHead.indexOf('\r\n\r\n');
+          if (he < 0) return;
+          const text = resHead.slice(0, he).toString('latin1');
+          const status = Number((text.match(/HTTP\/1\.[01] (\d+)/) || [])[1] || 0);
+          if ([301, 302, 303, 307, 308].includes(status)) {
+            const loc = /location:\s*(\S+)/i.exec(text)?.[1];
+            try { socket.destroy(); } catch {}
+            if (!loc) return onDownloadError(new Error('重定向缺 Location'));
+            return downloadUpdate(version, new UrlURL(loc, url).toString(), total, depth + 1);
+          }
+          if (status !== 200) return onDownloadError(new Error('下载 HTTP ' + status));
+          headParsed = true;
+          fileOut = fs.createWriteStream(outPath);
+          const rest = resHead.slice(he + 4);
+          if (rest.length) { got += rest.length; fileOut.write(rest); }
+          return;
+        }
         got += td.length;
         fileOut.write(td);
         if (got - lastLog > 20 * 1048576) { lastLog = got; mlog('[UPDATE] 下载进度:', Math.round(got / 1048576) + 'MB /', Math.round(total / 1048576) + 'MB'); }
       });
       tlsSock.on('end', () => {
+        if (!headParsed) return onDownloadError(new Error('响应异常'));
         fileOut.end(() => {
-          mlog('[UPDATE] 下载完成:', outPath);
+          mlog('[UPDATE] 下载完成:', outPath, Math.round(got / 1048576) + 'MB');
           updateState = { status: 'ready', version, path: outPath };
           rebuildTrayMenu();
           updateNotify('新版本 v' + version + ' 已就绪', '点击此通知立即重启升级，或稍后在托盘菜单操作', () => installUpdate());
