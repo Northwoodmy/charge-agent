@@ -437,3 +437,7 @@ body:has(.mini) #root { max-width: none; margin: 0; padding: 0; }
 .detail-table td { padding: 5px 8px 5px 0; border-top: 1px solid var(--line-soft); }
 .detail-table td:first-child { color: var(--muted); width: 110px; }
 .detail-spark { width: 100%; height: 60px; background: var(--paper); border: 1px solid var(--line-soft); border-radius: var(--radius); }
+
+.port-device { font-weight: 700; color: var(--ink); }
+.port-batt { color: var(--green); font-weight: 600; }
+.detail-device { font-size: 15px; font-weight: 600; margin: -6px 0 12px; color: var(--ink); }

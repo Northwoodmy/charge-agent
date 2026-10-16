@@ -191,7 +191,7 @@ function Overview({ status }) {
   );
 }
 
-function PortCard({ port, onToggle }) {
+function PortCard({ port, onToggle, pdInfo }) {
   const [busy, setBusy] = React.useState(false);
   const [showDetail, setShowDetail] = React.useState(false);
   const toggle = async () => {
@@ -226,6 +226,10 @@ function PortCard({ port, onToggle }) {
       <div className="port-meta">
         {port.attached ? (
           <>
+            {pdInfo?.device_name_zh && <span className="port-device">{pdInfo.device_name_zh}</span>}
+            {pdInfo?.battery_present && pdInfo.battery_design_capacity > 0 && (
+              <span className="port-batt">电量 {Math.round((pdInfo.battery_present_capacity / pdInfo.battery_design_capacity) * 100)}%</span>
+            )}
             <span>{port.protocol}</span>
             <span>已充 {fmtDur(port.durationS)}</span>
             <span>≈{port.sessionWh}Wh</span>
@@ -293,6 +297,9 @@ function PortDetailModal({ port, onClose }) {
     <div className="modal-mask" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h2>{port.name} 口详情</h2>
+        {pd?.device_name_zh && (
+          <div className="detail-device">{pd.device_brand_zh && pd.device_brand_zh !== pd.device_name_zh ? `${pd.device_brand_zh} · ` : ''}{pd.device_name_zh}</div>
+        )}
         {err && <div className="form-msg">读取失败：{err}</div>}
         {!pd && !err && <div className="form-msg">读取中…</div>}
         {pd && !pd.cable_brand_zh && !pd.pd_revision && (
@@ -308,6 +315,9 @@ function PortDetailModal({ port, onClose }) {
                   <tr><td>当前工作点</td><td>{pd.operating_voltage ? `${pd.operating_voltage / 1000}V · ${pd.operating_current}mA` : '—'}</td></tr>
                   {pd.sink_maximum_pdp > 0 && <tr><td>设备需求功率</td><td>峰值 {pd.sink_maximum_pdp}W · 典型 {pd.sink_operational_pdp}W</td></tr>}
                   <tr><td>PPS 快充</td><td>{pd.pps_charging_supported ? '支持' : '不支持'}</td></tr>
+                  {pd.battery_present && pd.battery_design_capacity > 0 && (
+                    <tr><td>设备电池</td><td>{Math.round((pd.battery_present_capacity / pd.battery_design_capacity) * 100)}%（{{0: '充电中', 1: '放电', 2: '已充满'}[pd.battery_status] || '静置'}）</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -665,6 +675,21 @@ function FullApp() {
   };
 
   const [settingsOpen, setSettingsOpen] = React.useState(() => window.location.hash === '#settings');
+  // PD 协商快照（30s 轮询）：设备名/电池等，读不到就不显示
+  const [pdMap, setPdMap] = React.useState({});
+  React.useEffect(() => {
+    const load = () => api.query('get_port_pd_status', {}).then((r) => {
+      try {
+        const all = JSON.parse(r?.result || 'null');
+        const map = {};
+        for (const p of all?.ports || []) map[p.port] = p;
+        setPdMap(map);
+      } catch {}
+    }).catch(() => {});
+    load();
+    const t = setInterval(load, 30000);
+    return () => clearInterval(t);
+  }, []);
   const reloadSettings = () => {
     api.settings().then(setSettings).catch(() => {});
     // 刷新速率保存后同步页面轮询节奏
@@ -678,7 +703,7 @@ function FullApp() {
       <Header status={status} mcp={mcp} onOpenSettings={() => setSettingsOpen(true)} />
       <Overview status={status} />
       <div className="ports">
-        {status?.data?.ports.slice().sort((a, b) => (a.type === 'A') - (b.type === 'A')).map((p) => <PortCard key={p.idx} port={p} onToggle={togglePort} />)}
+        {status?.data?.ports.slice().sort((a, b) => (a.type === 'A') - (b.type === 'A')).map((p) => <PortCard key={p.idx} port={p} onToggle={togglePort} pdInfo={pdMap[p.no]} />)}
       </div>
       <StatsBar status={status} />
       <ChartSection />
