@@ -256,7 +256,8 @@ function buildTrayMenu() {
   );
   return Menu.buildFromTemplate(items);
 }
-function rebuildTrayMenu() { if (tray) tray.setContextMenu(buildTrayMenu()); }
+// 菜单在每次右键时按需构建，无需预挂（setContextMenu 会让左键也弹菜单）
+function rebuildTrayMenu() {}
 
 function updateNotify(title, body, onClick) {
   if (!Notification.isSupported()) return;
@@ -344,9 +345,8 @@ app.whenReady().then(() => {
   // 系统主题切换时换字标配色
   nativeTheme.on('updated', () => { lastTrayKey = null; updateTrayDisplay(lastTotalW, lastOnline); });
   // 右键菜单（macOS 上 setContextMenu 会让左键也弹菜单，所以改用手动 popUp）
-  rebuildTrayMenu();
   tray.on('click', toggleWindow);                      // 左键：直接弹/收看板
-  tray.on('right-click', () => tray.popUpContextMenu(buildTrayMenu())); // 右键：菜单
+  tray.on('right-click', () => tray.popUpContextMenu(buildTrayMenu())); // 右键：菜单（按需构建，标签永远新鲜）
 
   setupUpdater();
 
