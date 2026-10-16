@@ -346,30 +346,29 @@ function updateNotify(title, body, onClick) {
   n.show();
 }
 
-// 手动检查：拉取最新 Release，比较版本
+// 手动检查：走 releases.atom（不受 API 速率限制），取最高版本号
 async function manualCheckUpdate() {
   if (checkingUpdate || updateState) return;
   checkingUpdate = true;
   rebuildTrayMenu();
   mlog('[UPDATE] 手动检查开始, 当前 v' + app.getVersion(), '代理:', UPDATE_PROXY);
   try {
-    const body = await githubGet('https://api.github.com/repos/Northwoodmy/charge-agent/releases/latest');
-    const rel = JSON.parse(body);
-    const remote = String(rel.tag_name || '').replace(/^v/, '');
-    mlog('[UPDATE] 远端最新:', rel.tag_name);
-    if (!remote) throw new Error('解析版本失败');
+    const atom = await githubGet('https://github.com/Northwoodmy/charge-agent/releases.atom');
+    const versions = [...atom.matchAll(/<title>v([0-9]+\.[0-9]+\.[0-9]+)<\/title>/g)].map((m) => m[1]);
+    if (!versions.length) throw new Error('解析 releases.atom 失败');
+    const remote = versions.reduce((a, b) => (semverGt(b, a) ? b : a));
+    mlog('[UPDATE] 远端版本列表:', versions.join(', '), '→ 最新 v' + remote);
     if (!semverGt(remote, app.getVersion())) {
       checkingUpdate = false;
       rebuildTrayMenu();
       updateNotify('已是最新版本', `当前 v${app.getVersion()}，无需更新`);
       return;
     }
-    const asset = (rel.assets || []).find((a) => a.name.endsWith('.zip'));
-    if (!asset) throw new Error('Release 里没有安装包');
-    updateState = { status: 'downloading', version: remote, url: asset.browser_download_url, size: asset.size };
+    const assetUrl = `https://github.com/Northwoodmy/charge-agent/releases/download/v${remote}/ChargeAgent-${remote}-arm64-mac.zip`;
+    updateState = { status: 'downloading', version: remote, url: assetUrl, size: 0 };
     rebuildTrayMenu();
     updateNotify('发现新版本 v' + remote, '正在后台下载，完成后会提醒你');
-    downloadUpdate(remote, asset.browser_download_url, asset.size);
+    downloadUpdate(remote, assetUrl, 140 * 1048576);
   } catch (e) {
     mlog('[UPDATE] 检查失败:', String(e.message || e).slice(0, 300));
     checkingUpdate = false;
