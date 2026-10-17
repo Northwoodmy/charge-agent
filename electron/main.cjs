@@ -352,7 +352,7 @@ function updateNotify(title, body, onClick) {
 // 检查更新：silent=true 时为自动检查（启动/定时），已最新不弹通知
 // 有待装版本不挡检查——远端有更新会自动换代（见下方版本比较）
 async function manualCheckUpdate(silent = false) {
-  if (checkingUpdate) return;
+  if (checkingUpdate || updateState?.status === 'downloading') return; // 下载中不并发检查
   checkingUpdate = true;
   rebuildTrayMenu();
   mlog(`[UPDATE] ${silent ? '自动' : '手动'}检查开始, 当前 v` + app.getVersion(), '代理:', UPDATE_PROXY);
