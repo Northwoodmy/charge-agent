@@ -350,8 +350,9 @@ function updateNotify(title, body, onClick) {
 }
 
 // 检查更新：silent=true 时为自动检查（启动/定时），已最新不弹通知
+// 有待装版本不挡检查——远端有更新会自动换代（见下方版本比较）
 async function manualCheckUpdate(silent = false) {
-  if (checkingUpdate || updateState) return;
+  if (checkingUpdate) return;
   checkingUpdate = true;
   rebuildTrayMenu();
   mlog(`[UPDATE] ${silent ? '自动' : '手动'}检查开始, 当前 v` + app.getVersion(), '代理:', UPDATE_PROXY);
@@ -372,13 +373,39 @@ async function manualCheckUpdate(silent = false) {
     const m = lr.headers.location.match(/tag\/v?([0-9]+\.[0-9]+\.[0-9]+)/);
     if (!m) throw new Error('无法从 Location 解析版本: ' + lr.headers.location);
     const remote = m[1];
-    mlog('[UPDATE] 远端最新: v' + remote);
+    mlog('[UPDATE] 远端最新: v' + remote, '| 本地 v' + app.getVersion(), '| 待装', updateState ? 'v' + updateState.version : '无');
     if (!semverGt(remote, app.getVersion())) {
       checkingUpdate = false;
       rebuildTrayMenu();
       mlog('[UPDATE] 已是最新');
-      if (!silent) updateNotify('已是最新版本', `当前 v${app.getVersion()}，无需更新`);
+      if (!silent) {
+        if (updateState?.status === 'ready') {
+          updateNotify(`已下载 v${updateState.version} 待安装`, '当前已是最新版，可在托盘菜单点「重启安装更新」');
+        } else {
+          updateNotify('已是最新版本', `当前 v${app.getVersion()}，无需更新`);
+        }
+      }
       return;
+    }
+    // 有待装版本时的换代逻辑
+    if (updateState?.status === 'ready') {
+      if (updateState.version === remote) {
+        mlog('[UPDATE] v' + remote + ' 已下载待装，跳过重复下载');
+        checkingUpdate = false;
+        rebuildTrayMenu();
+        if (!silent) updateNotify(`新版本 v${remote} 已就绪`, '点击托盘菜单「重启安装更新」完成升级');
+        return;
+      }
+      if (!semverGt(remote, updateState.version)) {
+        // 远端比待装版本还旧：保持现有待装包
+        checkingUpdate = false;
+        rebuildTrayMenu();
+        return;
+      }
+      // 远端更新：清理旧包，下载新版
+      mlog('[UPDATE] 待装 v' + updateState.version + ' 已过期，换代 v' + remote);
+      try { fs.unlinkSync(updateState.path); } catch {}
+      updateState = null;
     }
     const assetUrl = `https://github.com/Northwoodmy/charge-agent/releases/download/v${remote}/ChargeAgent-${remote}-arm64-mac.zip`;
     updateState = { status: 'downloading', version: remote, url: assetUrl, size: 0 };
