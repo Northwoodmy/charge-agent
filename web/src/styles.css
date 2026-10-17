@@ -457,3 +457,7 @@ body:has(.mini) #root { max-width: none; margin: 0; padding: 0; }
 .chip-dot.idle { background: #cfcabf; }
 .chip-name { font-size: 11.5px; font-weight: 600; }
 .chip-val { font-size: 10.5px; color: var(--muted); }
+
+/* 详情弹层隐藏滚动条（滚轮仍可滚动） */
+.modal { scrollbar-width: none; }
+.modal::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none; }
