@@ -191,6 +191,11 @@ function Overview({ status }) {
   );
 }
 
+// PD 设备温度档位翻译
+function fmtTempC(t) {
+  return { cool: '凉爽', moderate: '适中', warm: '偏热' }[t] || null;
+}
+
 // PD 电池信息格式化：65535(0xFFFF) 是协议"未知"哨兵，决不当真值显示
 function fmtBatt(pd) {
   if (!pd?.battery_present || pd.battery_invalid) return null;
@@ -245,6 +250,7 @@ function PortCard({ port, onToggle, pdInfo }) {
           <>
             {pdInfo?.device_name_zh && <span className="port-device">{pdInfo.device_name_zh}</span>}
             {fmtBatt(pdInfo) && <span className="port-batt">{fmtBatt(pdInfo)}</span>}
+            {fmtTempC(pdInfo?.status_temperature) && <span>{fmtTempC(pdInfo.status_temperature)}</span>}
             <span>{port.protocol}</span>
             <span>已充 {fmtDur(port.durationS)}</span>
             <span>≈{(pdInfo?.session_charge_mwh > 0 ? pdInfo.session_charge_mwh / 1000 : port.sessionWh).toFixed(1)}Wh</span>
@@ -332,6 +338,9 @@ function PortDetailModal({ port, onClose }) {
                   <tr><td>PPS 快充</td><td>{pd.pps_charging_supported ? '支持' : '不支持'}</td></tr>
                   {fmtBatt(pd) && (
                     <tr><td>设备电池</td><td>{fmtBatt(pd)}（{{0: '充电中', 1: '放电', 2: '已充满'}[pd.battery_status] || '静置'}）</td></tr>
+                  )}
+                  {fmtTempC(pd.status_temperature) && (
+                    <tr><td>设备温度</td><td>{fmtTempC(pd.status_temperature)}</td></tr>
                   )}
                   {(() => {
                     const d = pd.battery_design_capacity, f = pd.battery_last_full_charge_capacity;
