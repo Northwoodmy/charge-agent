@@ -343,13 +343,25 @@ function PortDetailModal({ port, onClose }) {
                     <tr><td>设备温度</td><td>{fmtTempC(pd.status_temperature)}</td></tr>
                   )}
                   {(() => {
-                    const d = pd.battery_design_capacity, f = pd.battery_last_full_charge_capacity;
                     if (!pd.battery_present || pd.battery_invalid) return null;
-                    if (!(d > 0) || d === 65535 || !(f > 0) || f === 65535) return null;
-                    const health = Math.min(100, Math.round((f / d) * 100));
-                    return (
-                      <tr><td>电池健康</td><td>{health}%（{(100 - health > 0) ? `衰减 ${100 - health}%` : '无衰减'}）</td></tr>
-                    );
+                    const U = 65535;
+                    const rows = [];
+                    const d = pd.battery_design_capacity, f = pd.battery_last_full_charge_capacity;
+                    if (d > 0 && d !== U && f > 0 && f !== U) {
+                      const health = Math.min(100, Math.round((f / d) * 100));
+                      rows.push(
+                        <tr key="h"><td>电池健康</td><td>{health}%（{(100 - health > 0) ? `衰减 ${100 - health}%` : '无衰减'}）</td></tr>
+                      );
+                    }
+                    const parts = [];
+                    const cur = pd.battery_present_capacity;
+                    if (cur > 0 && cur !== U) parts.push(`当前 ${(cur / 10).toFixed(1)}Wh`);
+                    if (f > 0 && f !== U) parts.push(`满充 ${(f / 10).toFixed(1)}Wh`);
+                    if (d > 0 && d !== U) parts.push(`设计 ${(d / 10).toFixed(1)}Wh`);
+                    if (parts.length) {
+                      rows.push(<tr key="c"><td>电池容量</td><td>{parts.join(' · ')}</td></tr>);
+                    }
+                    return rows.length ? <>{rows}</> : null;
                   })()}
                 </tbody>
               </table>
@@ -409,11 +421,20 @@ function ControlPanel() {
   const [flash, setFlash] = React.useState('');
 
   const refresh = React.useCallback(async () => {
-    const [temp, disp] = await Promise.all([
+    const [temp, disp, det] = await Promise.all([
       api.query('get_temperature_mode', {}).catch(() => null),
       api.query('get_display_config', {}).catch(() => null),
+      api.query('get_port_details', {}).catch(() => null),
     ]);
-    setInfo({ temp: temp?.result, disp: disp?.result });
+    let dieTemps = null;
+    try {
+      const all = JSON.parse(det?.result || 'null');
+      if (all?.ports?.length) {
+        dieTemps = {};
+        for (const p of all.ports) dieTemps[p.port] = p.die_temperature;
+      }
+    } catch {}
+    setInfo({ temp: temp?.result, disp: disp?.result, dieTemps });
   }, []);
 
   React.useEffect(() => { refresh(); }, [refresh]);
@@ -451,6 +472,24 @@ function ControlPanel() {
             <button className={`btn sm ghost ${tempMode === 1 ? 'active' : ''}`} onClick={() => act('温度优先', () => api.control('set_temperature_mode', { mode: 1 }))}>温度优先</button>
           </div>
           <div className="ctrl-status">{info.temp ? fmtTemp(info.temp) : '读取中…'}</div>
+          {info.dieTemps && (
+            <div className="chip-temps">
+              <div className="chip-temps-label">各口芯片温度</div>
+              <div className="chip-temps-row">
+                {[[2, 'C1'], [3, 'C2'], [4, 'C3'], [5, 'C4'], [1, 'A']].map(([no, name]) => {
+                  const t = info.dieTemps[no];
+                  const cls = { cool: 'cool', moderate: 'mid', warm: 'hot' }[t] || 'idle';
+                  return (
+                    <div key={no} className="chip-temp" title="SW3566 功率芯片温度">
+                      <span className={`chip-dot ${cls}`} />
+                      <span className="chip-name">{name}</span>
+                      <span className="chip-val">{fmtTempC(t) || '—'}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
         <div className="ctrl-group">
           <h3>状态屏</h3>
