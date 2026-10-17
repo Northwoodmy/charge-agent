@@ -348,9 +348,11 @@ function PortDetailModal({ port, onClose }) {
                     const rows = [];
                     const d = pd.battery_design_capacity, f = pd.battery_last_full_charge_capacity;
                     if (d > 0 && d !== U && f > 0 && f !== U) {
-                      const health = Math.min(100, Math.round((f / d) * 100));
+                      const ratio = Math.min(100, (f / d) * 100);
+                      const health = ratio.toFixed(1);
+                      const loss = ((d - f) / 10).toFixed(1);
                       rows.push(
-                        <tr key="h"><td>电池健康</td><td>{health}%（{(100 - health > 0) ? `衰减 ${100 - health}%` : '无衰减'}）</td></tr>
+                        <tr key="h"><td>电池健康</td><td>{health}%（{ratio < 100 ? `衰减 ${(100 - ratio).toFixed(1)}%，损失 ${loss}Wh` : '无衰减'}）</td></tr>
                       );
                     }
                     const parts = [];
